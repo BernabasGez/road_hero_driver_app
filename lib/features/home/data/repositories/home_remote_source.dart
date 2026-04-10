@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
-import '../../../auth/data/models/user_model.dart';
-import '../../../../core/utils/local_storage.dart';
+import 'package:road_hero/core/utils/local_storage.dart';
+import 'package:road_hero/features/auth/data/models/user_model.dart';
+import 'package:road_hero/features/home/data/models/provider_model.dart';
 
 class HomeRemoteSource {
   final Dio dio;
@@ -15,21 +16,48 @@ class HomeRemoteSource {
     return UserModel.fromJson(response.data['data']);
   }
 
-  Future<Map<String, dynamic>> diagnoseIssue(String description) async {
+  Future<List<ProviderModel>> getNearbyProviders() async {
     final token = await LocalStorage.getToken();
     try {
-      final response = await dio.post(
-        'ai/diagnose',
-        data: {"issue_description": description},
+      final response = await dio.get(
+        'providers/nearby',
+        queryParameters: {'lat': 9.019, 'lng': 38.75, 'radius_km': 50},
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
-      // This returns {ai_response, requires_mechanic, recommended_service_type}
-      return response.data['data'];
+
+      print(
+        "RAW API DATA: ${response.data}",
+      ); // This helps us see what the server sent
+
+      // FIX: Check if the data is inside a Map or is a direct List
+      var rawData = response.data['data'];
+
+      List<dynamic> listToParse = [];
+
+      if (rawData is List) {
+        listToParse = rawData;
+      } else if (rawData is Map && rawData.containsKey('results')) {
+        // Some backends put the list inside a 'results' key
+        listToParse = rawData['results'];
+      } else {
+        // If it is just an empty Map or something else
+        return [];
+      }
+
+      return listToParse.map((json) => ProviderModel.fromJson(json)).toList();
     } on DioException catch (e) {
-      print("AI API ERROR: ${e.response?.data}");
-      throw Exception(
-        "The AI is taking too long. Please try again with better signal.",
-      );
+      print("GARAGE FETCH ERROR: ${e.response?.data}");
+      throw Exception(e.response?.data['message'] ?? "Connection Error");
     }
+  }
+
+  Future<Map<String, dynamic>> diagnoseIssue(String description) async {
+    final token = await LocalStorage.getToken();
+    final response = await dio.post(
+      'ai/diagnose',
+      data: {"issue_description": description},
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return response.data['data'];
   }
 }

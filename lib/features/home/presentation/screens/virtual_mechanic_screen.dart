@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-// Using Package Import is safer and fixes the "sl" not found error
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
@@ -33,12 +32,11 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
     });
 
     try {
-      // Calling the AI API via the Service Locator (sl)
       final result = await sl<HomeRemoteSource>().diagnoseIssue(text);
       setState(() {
         _messages.add({
           "role": "ai",
-          "text": result['ai_response'],
+          "text": result['ai_response'] ?? "I'm not sure about that one.",
           "action": result['requires_mechanic'] == true
               ? result['recommended_service_type']
               : null,
@@ -50,7 +48,7 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
         _messages.add({
           "role": "ai",
           "text":
-              "The AI is taking a bit long. Please check your signal and try again.",
+              "I'm having trouble connecting. Try again when your signal is stronger.",
         });
         isTyping = false;
       });

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/di/injection_container.dart';
-import '../../data/repositories/home_remote_source.dart';
-import '../../../auth/data/models/user_model.dart';
-import 'virtual_mechanic_screen.dart'; // THIS WAS THE MISSING IMPORT
+import 'package:road_hero/core/theme/app_colors.dart';
+import 'package:road_hero/core/di/injection_container.dart';
+import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
+import 'package:road_hero/features/auth/data/models/user_model.dart';
+import 'virtual_mechanic_screen.dart';
+import 'explore_screen.dart'; // Add this import
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,7 +16,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   UserModel? user;
   bool isLoading = true;
-  String? errorMessage;
 
   @override
   void initState() {
@@ -26,56 +26,30 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadUserData() async {
     try {
       final data = await sl<HomeRemoteSource>().getProfile();
-      if (mounted) {
+      if (mounted)
         setState(() {
           user = data;
           isLoading = false;
         });
-      }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          errorMessage = e.toString();
-          isLoading = false;
-        });
-      }
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(color: AppColors.primaryBlue),
-        ),
-      );
-    }
-
-    if (errorMessage != null) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Text("Error: $errorMessage", textAlign: TextAlign.center),
-          ),
-        ),
-      );
-    }
+    if (isLoading)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
-      drawer: const Drawer(),
       body: Stack(
         children: [
-          // 1. MAP BACKGROUND
           Container(
             color: Colors.grey.shade100,
             child: const Center(
               child: Icon(Icons.map, size: 100, color: Colors.grey),
             ),
           ),
-
-          // 2. TOP LOCATION BAR
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -91,39 +65,29 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: Row(
                   children: [
-                    Builder(
-                      builder: (context) => IconButton(
-                        icon: const Icon(Icons.menu),
-                        onPressed: () => Scaffold.of(context).openDrawer(),
-                      ),
-                    ),
+                    const Icon(Icons.menu),
+                    const SizedBox(width: 12),
                     const Icon(Icons.location_on, color: Colors.red, size: 20),
                     const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        "Bole, Addis Ababa",
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    const Text(
+                      "Bole, Addis Ababa",
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
               ),
             ),
           ),
-
-          // 3. BOTTOM SHEET CONTENT
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+              padding: const EdgeInsets.all(24),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(30),
                   topRight: Radius.circular(30),
                 ),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20)],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -137,13 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-
-                  // AI ASSISTANT BANNER
                   _buildAIBanner(),
-
                   const SizedBox(height: 24),
-
-                  // SERVICE GRID
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -162,7 +121,16 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: BottomNavigationBar(
         selectedItemColor: AppColors.primaryBlue,
         unselectedItemColor: Colors.grey,
+        currentIndex: 0,
         type: BottomNavigationBarType.fixed,
+        onTap: (index) {
+          if (index == 1) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const ExploreScreen()),
+            );
+          }
+        },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: 'Home'),
           BottomNavigationBarItem(
@@ -181,14 +149,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildAIBanner() {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const VirtualMechanicScreen(),
-          ),
-        );
-      },
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const VirtualMechanicScreen()),
+      ),
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -197,25 +161,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: const Row(
           children: [
-            Icon(Icons.auto_awesome, color: Colors.white, size: 28),
+            Icon(Icons.auto_awesome, color: Colors.white),
             SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Hear a strange noise? Ask AI.",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    "Instant diagnosis.",
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
+              child: Text(
+                "Hear a strange noise? Ask AI.",
+                style: TextStyle(color: Colors.white, fontSize: 13),
               ),
             ),
             Icon(Icons.arrow_forward_ios, color: Colors.white, size: 14),
