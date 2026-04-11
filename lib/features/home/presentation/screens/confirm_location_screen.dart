@@ -7,11 +7,13 @@ import 'package:road_hero/features/home/data/repositories/home_remote_source.dar
 class ConfirmLocationScreen extends StatefulWidget {
   final ProviderModel provider;
   final String description;
+  final int vehicleId; // New parameter
 
   const ConfirmLocationScreen({
     super.key,
     required this.provider,
     required this.description,
+    required this.vehicleId,
   });
 
   @override
@@ -24,38 +26,38 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
   Future<void> _submitRequest() async {
     setState(() => isSubmitting = true);
     try {
-      // Sending static coordinates for testing (Addis Ababa)
       final requestId = await sl<HomeRemoteSource>().createRequest(
         providerId: widget.provider.id,
+        vehicleId: widget.vehicleId, // SENDING REAL ID
         issueDescription: widget.description,
-        lat: 9.02,
-        lng: 38.74,
+        lat: 9.0192,
+        lng: 38.7525,
       );
 
       if (mounted) {
         showDialog(
           context: context,
+          barrierDismissible: false,
           builder: (context) => AlertDialog(
-            title: const Text("Request Sent!"),
+            title: const Text("Request Successful!"),
             content: Text(
-              "Your request #$requestId has been sent to ${widget.provider.businessName}. They will contact you shortly.",
+              "Your request #$requestId has been sent. Check the Activity tab for updates.",
             ),
             actions: [
               TextButton(
                 onPressed: () =>
                     Navigator.of(context).popUntil((route) => route.isFirst),
-                child: const Text("OK"),
+                child: const Text("Done"),
               ),
             ],
           ),
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
         );
-      }
     } finally {
       if (mounted) setState(() => isSubmitting = false);
     }
@@ -66,7 +68,6 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // Map Background Placeholder
           Container(
             color: Colors.grey.shade200,
             child: const Center(
@@ -77,21 +78,22 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
               ),
             ),
           ),
-
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
-              child: IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.arrow_back, color: Colors.black),
+              child: CircleAvatar(
+                backgroundColor: Colors.white,
+                child: IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.arrow_back, color: Colors.black),
+                ),
               ),
             ),
           ),
-
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(32),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -103,13 +105,8 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    "Confirm Pickup Location",
+                    "Pickup Point",
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "Friendship Park, Bole Road",
-                    style: TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 32),
                   SizedBox(
@@ -119,9 +116,6 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
                       onPressed: isSubmitting ? null : _submitRequest,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.actionOrange,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
                       ),
                       child: isSubmitting
                           ? const CircularProgressIndicator(color: Colors.white)
@@ -129,7 +123,6 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
                               "Confirm & Request",
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 16,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),

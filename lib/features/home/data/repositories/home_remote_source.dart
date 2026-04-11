@@ -23,11 +23,10 @@ class HomeRemoteSource {
     final token = await LocalStorage.getToken();
     try {
       final Map<String, dynamic> queryParams = {
-        'lat': 9.0192, // Using exact coordinate from your log
+        'lat': 9.0192,
         'lng': 38.7525,
         'radius_km': 100,
       };
-
       if (isOnline != null) queryParams['is_online'] = isOnline;
       if (serviceTypeId != null) queryParams['service_type_id'] = serviceTypeId;
 
@@ -36,17 +35,45 @@ class HomeRemoteSource {
         queryParameters: queryParams,
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
-
-      // LOGIC MATCHING YOUR TERMINAL: response.data -> data -> results
       final dynamic rawResults = response.data['data']['results'];
-
-      if (rawResults is List) {
+      if (rawResults is List)
         return rawResults.map((json) => ProviderModel.fromJson(json)).toList();
-      }
       return [];
     } catch (e) {
-      print("EXPLORE ERROR: $e");
       return [];
+    }
+  }
+
+  // UPDATED: Now accepts vehicleId and uses destination coordinates
+  Future<int> createRequest({
+    required int providerId,
+    required int vehicleId, // New required field
+    required String issueDescription,
+    required double lat,
+    required double lng,
+  }) async {
+    final token = await LocalStorage.getToken();
+    try {
+      final response = await dio.post(
+        'requests/',
+        data: {
+          "provider_id": providerId,
+          "service_type_id": 1,
+          "vehicle_id": vehicleId, // Using the real ID now
+          "pickup_lat": lat,
+          "pickup_lng": lng,
+          "destination_lat": lat + 0.001, // Required by some backends
+          "destination_lng": lng + 0.001,
+          "issue_description": issueDescription,
+        },
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+      return response.data['data']['id'];
+    } on DioException catch (e) {
+      print("CREATE REQUEST ERROR: ${e.response?.data}");
+      throw Exception(
+        e.response?.data['message'] ?? "Request failed. Try again.",
+      );
     }
   }
 
@@ -67,27 +94,5 @@ class HomeRemoteSource {
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );
     return response.data['data'];
-  }
-
-  Future<int> createRequest({
-    required int providerId,
-    required String issueDescription,
-    required double lat,
-    required double lng,
-  }) async {
-    final token = await LocalStorage.getToken();
-    final response = await dio.post(
-      'requests/',
-      data: {
-        "provider_id": providerId,
-        "service_type_id": 1,
-        "vehicle_id": 1,
-        "pickup_lat": lat,
-        "pickup_lng": lng,
-        "issue_description": issueDescription,
-      },
-      options: Options(headers: {'Authorization': 'Bearer $token'}),
-    );
-    return response.data['data']['id'];
   }
 }
