@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-// Using Package Import to fix the SL error
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/features/auth/presentation/bloc/auth_bloc.dart';
@@ -23,8 +22,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (context) =>
-          sl<AuthBloc>(), // sl will now be recognized correctly
+      create: (context) => sl<AuthBloc>(),
       child: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthSuccess) {
@@ -56,15 +54,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                     "Verify Phone Number",
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Enter the 6-digit code sent to ${widget.phoneNumber}",
-                    style: const TextStyle(color: Colors.grey),
-                  ),
                   const SizedBox(height: 40),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: List.generate(6, (index) => _buildOtpBox(index)),
+                    children: List.generate(6, (index) => _buildBox(index)),
                   ),
                   const Spacer(),
                   SizedBox(
@@ -77,10 +70,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                               String otp = _controllers
                                   .map((e) => e.text)
                                   .join();
-                              if (otp.length < 6) return;
-                              context.read<AuthBloc>().add(
-                                VerifyOtpSubmitted(widget.phoneNumber, otp),
-                              );
+                              if (otp.length == 6)
+                                context.read<AuthBloc>().add(
+                                  VerifyOtpSubmitted(widget.phoneNumber, otp),
+                                );
                             },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.actionOrange,
@@ -109,7 +102,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     );
   }
 
-  Widget _buildOtpBox(int index) {
+  Widget _buildBox(int index) {
     return Container(
       width: 45,
       height: 55,
@@ -123,14 +116,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         textAlign: TextAlign.center,
         keyboardType: TextInputType.number,
         maxLength: 1,
-        onChanged: (value) {
-          if (value.isNotEmpty && index < 5) FocusScope.of(context).nextFocus();
+        onChanged: (v) => {
+          if (v.isNotEmpty && index < 5) FocusScope.of(context).nextFocus(),
         },
         decoration: const InputDecoration(
           counterText: "",
           border: InputBorder.none,
         ),
-        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
       ),
     );
   }

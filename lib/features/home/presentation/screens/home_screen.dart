@@ -3,8 +3,9 @@ import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
 import 'package:road_hero/features/auth/data/models/user_model.dart';
-import 'virtual_mechanic_screen.dart';
-import 'explore_screen.dart'; // Add this import
+import 'package:road_hero/features/home/presentation/screens/virtual_mechanic_screen.dart';
+import 'package:road_hero/features/home/presentation/screens/explore_screen.dart';
+import 'package:road_hero/features/home/presentation/screens/activity_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -47,7 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             color: Colors.grey.shade100,
             child: const Center(
-              child: Icon(Icons.map, size: 100, color: Colors.grey),
+              child: Icon(Icons.map_outlined, size: 100, color: Colors.grey),
             ),
           ),
           SafeArea(
@@ -63,15 +64,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     BoxShadow(color: Colors.black12, blurRadius: 10),
                   ],
                 ),
-                child: Row(
+                child: const Row(
                   children: [
-                    const Icon(Icons.menu),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.location_on, color: Colors.red, size: 20),
-                    const SizedBox(width: 8),
-                    const Text(
-                      "Bole, Addis Ababa",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                    Icon(Icons.menu),
+                    SizedBox(width: 12),
+                    Icon(Icons.location_on, color: Colors.red, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Bole, Addis Ababa",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -81,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -107,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       _serviceItem(Icons.local_shipping, "Towing"),
-                      _serviceItem(Icons.build, "Repair"),
+                      _serviceItem(Icons.build_circle, "Repair"),
                       _serviceItem(Icons.tire_repair, "Tire"),
                       _serviceItem(Icons.local_gas_station, "Fuel"),
                     ],
@@ -124,12 +130,16 @@ class _HomeScreenState extends State<HomeScreen> {
         currentIndex: 0,
         type: BottomNavigationBarType.fixed,
         onTap: (index) {
-          if (index == 1) {
+          if (index == 1)
             Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const ExploreScreen()),
             );
-          }
+          if (index == 2)
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const ActivityScreen()),
+            );
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: 'Home'),
@@ -137,7 +147,10 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.explore_outlined),
             label: 'Explore',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Activity'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.history_outlined),
+            label: 'Activity',
+          ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),
             label: 'Profile',

@@ -16,39 +16,47 @@ class HomeRemoteSource {
     return UserModel.fromJson(response.data['data']);
   }
 
-  Future<List<ProviderModel>> getNearbyProviders() async {
+  Future<List<ProviderModel>> getNearbyProviders({
+    bool? isOnline,
+    int? serviceTypeId,
+  }) async {
     final token = await LocalStorage.getToken();
     try {
+      final Map<String, dynamic> queryParams = {
+        'lat': 9.0192, // Using exact coordinate from your log
+        'lng': 38.7525,
+        'radius_km': 100,
+      };
+
+      if (isOnline != null) queryParams['is_online'] = isOnline;
+      if (serviceTypeId != null) queryParams['service_type_id'] = serviceTypeId;
+
       final response = await dio.get(
         'providers/nearby',
-        queryParameters: {'lat': 9.019, 'lng': 38.75, 'radius_km': 50},
+        queryParameters: queryParams,
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
 
-      print(
-        "RAW API DATA: ${response.data}",
-      ); // This helps us see what the server sent
+      // LOGIC MATCHING YOUR TERMINAL: response.data -> data -> results
+      final dynamic rawResults = response.data['data']['results'];
 
-      // FIX: Check if the data is inside a Map or is a direct List
-      var rawData = response.data['data'];
-
-      List<dynamic> listToParse = [];
-
-      if (rawData is List) {
-        listToParse = rawData;
-      } else if (rawData is Map && rawData.containsKey('results')) {
-        // Some backends put the list inside a 'results' key
-        listToParse = rawData['results'];
-      } else {
-        // If it is just an empty Map or something else
-        return [];
+      if (rawResults is List) {
+        return rawResults.map((json) => ProviderModel.fromJson(json)).toList();
       }
-
-      return listToParse.map((json) => ProviderModel.fromJson(json)).toList();
-    } on DioException catch (e) {
-      print("GARAGE FETCH ERROR: ${e.response?.data}");
-      throw Exception(e.response?.data['message'] ?? "Connection Error");
+      return [];
+    } catch (e) {
+      print("EXPLORE ERROR: $e");
+      return [];
     }
+  }
+
+  Future<List<dynamic>> getMyRequests() async {
+    final token = await LocalStorage.getToken();
+    final response = await dio.get(
+      'requests/',
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return response.data['data'] ?? [];
   }
 
   Future<Map<String, dynamic>> diagnoseIssue(String description) async {
@@ -59,5 +67,27 @@ class HomeRemoteSource {
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );
     return response.data['data'];
+  }
+
+  Future<int> createRequest({
+    required int providerId,
+    required String issueDescription,
+    required double lat,
+    required double lng,
+  }) async {
+    final token = await LocalStorage.getToken();
+    final response = await dio.post(
+      'requests/',
+      data: {
+        "provider_id": providerId,
+        "service_type_id": 1,
+        "vehicle_id": 1,
+        "pickup_lat": lat,
+        "pickup_lng": lng,
+        "issue_description": issueDescription,
+      },
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return response.data['data']['id'];
   }
 }
