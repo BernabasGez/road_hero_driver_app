@@ -16,8 +16,10 @@ class HomeRemoteSource {
     return UserModel.fromJson(response.data['data']);
   }
 
+  // UPDATED: Now supports all backend filters
   Future<List<ProviderModel>> getNearbyProviders({
     bool? isOnline,
+    bool? isVerified,
     int? serviceTypeId,
   }) async {
     final token = await LocalStorage.getToken();
@@ -27,7 +29,9 @@ class HomeRemoteSource {
         'lng': 38.7525,
         'radius_km': 100,
       };
+
       if (isOnline != null) queryParams['is_online'] = isOnline;
+      if (isVerified != null) queryParams['is_verified'] = isVerified;
       if (serviceTypeId != null) queryParams['service_type_id'] = serviceTypeId;
 
       final response = await dio.get(
@@ -35,6 +39,7 @@ class HomeRemoteSource {
         queryParameters: queryParams,
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
+
       final dynamic rawResults = response.data['data']['results'];
       if (rawResults is List)
         return rawResults.map((json) => ProviderModel.fromJson(json)).toList();
@@ -44,37 +49,29 @@ class HomeRemoteSource {
     }
   }
 
-  // UPDATED: Now accepts vehicleId and uses destination coordinates
   Future<int> createRequest({
     required int providerId,
-    required int vehicleId, // New required field
+    required int vehicleId,
     required String issueDescription,
     required double lat,
     required double lng,
   }) async {
     final token = await LocalStorage.getToken();
-    try {
-      final response = await dio.post(
-        'requests/',
-        data: {
-          "provider_id": providerId,
-          "service_type_id": 1,
-          "vehicle_id": vehicleId, // Using the real ID now
-          "pickup_lat": lat,
-          "pickup_lng": lng,
-          "destination_lat": lat + 0.001, // Required by some backends
-          "destination_lng": lng + 0.001,
-          "issue_description": issueDescription,
-        },
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-      return response.data['data']['id'];
-    } on DioException catch (e) {
-      print("CREATE REQUEST ERROR: ${e.response?.data}");
-      throw Exception(
-        e.response?.data['message'] ?? "Request failed. Try again.",
-      );
-    }
+    final response = await dio.post(
+      'requests/',
+      data: {
+        "provider_id": providerId,
+        "service_type_id": 1,
+        "vehicle_id": vehicleId,
+        "pickup_lat": lat,
+        "pickup_lng": lng,
+        "destination_lat": lat + 0.001,
+        "destination_lng": lng + 0.001,
+        "issue_description": issueDescription,
+      },
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return response.data['data']['id'];
   }
 
   Future<List<dynamic>> getMyRequests() async {

@@ -13,8 +13,13 @@ class ExploreScreen extends StatefulWidget {
 }
 
 class _ExploreScreenState extends State<ExploreScreen> {
-  List<ProviderModel> providers = [];
+  List<ProviderModel> allProviders = [];
+  List<ProviderModel> filteredProviders = [];
   bool isLoading = true;
+  String selectedFilter = "All";
+
+  // UPDATED: Removed "Verified", added "Towing" and "Repair"
+  final List<String> filters = ["All", "Open Now", "Towing", "Repair"];
 
   @override
   void initState() {
@@ -26,14 +31,38 @@ class _ExploreScreenState extends State<ExploreScreen> {
     setState(() => isLoading = true);
     try {
       final list = await sl<HomeRemoteSource>().getNearbyProviders();
-      if (mounted)
+      if (mounted) {
         setState(() {
-          providers = list;
+          allProviders = list;
+          _applyFilter();
           isLoading = false;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  void _applyFilter() {
+    setState(() {
+      if (selectedFilter == "All") {
+        filteredProviders = allProviders;
+      } else if (selectedFilter == "Open Now") {
+        filteredProviders = allProviders.where((g) => g.isOnline).toList();
+      } else if (selectedFilter == "Towing") {
+        filteredProviders = allProviders
+            .where(
+              (g) => g.services.any((s) => s.toLowerCase().contains("towing")),
+            )
+            .toList();
+      } else if (selectedFilter == "Repair") {
+        filteredProviders = allProviders
+            .where(
+              (g) => g.services.any((s) => s.toLowerCase().contains("repair")),
+            )
+            .toList();
+      }
+    });
   }
 
   @override
@@ -49,18 +78,56 @@ class _ExploreScreenState extends State<ExploreScreen> {
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Colors.black),
       ),
-      body: isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: AppColors.primaryBlue),
-            )
-          : providers.isEmpty
-          ? const Center(child: Text("No garages found in this area."))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: providers.length,
-              itemBuilder: (context, index) =>
-                  _buildGarageCard(providers[index]),
+      body: Column(
+        children: [
+          // HORIZONTAL FILTERS
+          SizedBox(
+            height: 60,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              itemCount: filters.length,
+              itemBuilder: (context, index) {
+                bool isSelected = selectedFilter == filters[index];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(filters[index]),
+                    selected: isSelected,
+                    onSelected: (val) {
+                      setState(() => selectedFilter = filters[index]);
+                      _applyFilter();
+                    },
+                    selectedColor: AppColors.primaryBlue,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : Colors.black,
+                    ),
+                  ),
+                );
+              },
             ),
+          ),
+
+          Expanded(
+            child: isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: AppColors.primaryBlue,
+                    ),
+                  )
+                : filteredProviders.isEmpty
+                ? Center(
+                    child: Text("No $selectedFilter garages found nearby."),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: filteredProviders.length,
+                    itemBuilder: (context, index) =>
+                        _buildGarageCard(filteredProviders[index]),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -74,20 +141,31 @@ class _ExploreScreenState extends State<ExploreScreen> {
           backgroundColor: AppColors.primaryBlue.withOpacity(0.1),
           child: const Icon(Icons.build, color: AppColors.primaryBlue),
         ),
-        title: Text(
-          garage.businessName,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                garage.businessName,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            // We keep the badge because it builds trust, even if we don't filter by it
+            const Icon(Icons.verified, color: Colors.blue, size: 18),
+          ],
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("${garage.rating} ⭐ • ${garage.distanceKm} km away"),
-            const SizedBox(height: 4),
             Text(
-              garage.services.join(" • "),
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              "${garage.rating} ⭐ • ${garage.distanceKm.toStringAsFixed(1)} km away",
+            ),
+            Text(
+              garage.isOnline ? "Online" : "Offline",
+              style: TextStyle(
+                color: garage.isOnline ? Colors.green : Colors.grey,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
