@@ -3,11 +3,12 @@ import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/features/home/data/models/provider_model.dart';
 import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
+import 'package:road_hero/features/home/presentation/screens/tracking_screen.dart'; // REQUIRED IMPORT
 
 class ConfirmLocationScreen extends StatefulWidget {
   final ProviderModel provider;
   final String description;
-  final int vehicleId; // New parameter
+  final int vehicleId;
 
   const ConfirmLocationScreen({
     super.key,
@@ -28,7 +29,7 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
     try {
       final requestId = await sl<HomeRemoteSource>().createRequest(
         providerId: widget.provider.id,
-        vehicleId: widget.vehicleId, // SENDING REAL ID
+        vehicleId: widget.vehicleId,
         issueDescription: widget.description,
         lat: 9.0192,
         lng: 38.7525,
@@ -39,15 +40,39 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
           context: context,
           barrierDismissible: false,
           builder: (context) => AlertDialog(
-            title: const Text("Request Successful!"),
-            content: Text(
-              "Your request #$requestId has been sent. Check the Activity tab for updates.",
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
+            title: const Icon(
+              Icons.check_circle,
+              color: Colors.green,
+              size: 60,
+            ),
+            content: Text("Request sent to ${widget.provider.businessName}."),
             actions: [
-              TextButton(
-                onPressed: () =>
-                    Navigator.of(context).popUntil((route) => route.isFirst),
-                child: const Text("Done"),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(); // Close Dialog
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => TrackingScreen(
+                          requestId: requestId,
+                          garageName: widget.provider.businessName,
+                        ),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryBlue,
+                  ),
+                  child: const Text(
+                    "Track Now",
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
               ),
             ],
           ),
@@ -69,11 +94,11 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
       body: Stack(
         children: [
           Container(
-            color: Colors.grey.shade200,
+            color: Colors.grey.shade100,
             child: const Center(
               child: Icon(
                 Icons.location_on,
-                size: 80,
+                size: 100,
                 color: AppColors.primaryBlue,
               ),
             ),

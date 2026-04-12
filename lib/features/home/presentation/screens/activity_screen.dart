@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
+import 'package:road_hero/features/home/presentation/screens/tracking_screen.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -49,64 +50,58 @@ class _ActivityScreenState extends State<ActivityScreen> {
             )
           : requests.isEmpty
           ? const Center(child: Text("No requests found."))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: requests.length,
-              itemBuilder: (context, index) =>
-                  _buildRequestCard(requests[index]),
+          : RefreshIndicator(
+              onRefresh: _loadRequests,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: requests.length,
+                itemBuilder: (context, index) =>
+                    _buildRequestCard(requests[index]),
+              ),
             ),
     );
   }
 
   Widget _buildRequestCard(dynamic req) {
-    // Correctly mapping fields from the Postman documentation
-    final garageName = req['provider']?['business_name'] ?? "Unknown Garage";
-    final status = req['status'] ?? "PENDING";
-    final service = req['service_type'] ?? "General Assistance";
+    final String status = req['status'] ?? "PENDING";
+    final String garageName = req['provider']?['business_name'] ?? "Garage";
+    final int requestId = req['id'] ?? 0;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(16),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  garageName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                _statusBadge(status),
-              ],
-            ),
-            const SizedBox(height: 8),
             Text(
-              "Service: $service",
-              style: const TextStyle(color: Colors.grey),
+              garageName,
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            const Divider(height: 32),
-            const Row(
-              children: [
-                Icon(Icons.location_on, size: 14, color: AppColors.primaryBlue),
-                SizedBox(width: 8),
-                Text(
-                  "View Tracking Details",
-                  style: TextStyle(
-                    color: AppColors.primaryBlue,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
+            _statusBadge(status),
           ],
         ),
+        subtitle: const Padding(
+          padding: EdgeInsets.only(top: 8.0),
+          child: Text("Service: General Repair"),
+        ),
+        onTap: () {
+          // FIXED: Passing the required 'garageName' parameter
+          if (status == "PENDING" ||
+              status == "EN_ROUTE" ||
+              status == "ACCEPTED") {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TrackingScreen(
+                  requestId: requestId,
+                  garageName: garageName,
+                ),
+              ),
+            );
+          }
+        },
       ),
     );
   }
@@ -115,7 +110,8 @@ class _ActivityScreenState extends State<ActivityScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.1),
+        // FIXED: Using color.withAlpha instead of withOpacity to avoid deprecation
+        color: Colors.orange.withAlpha(25),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
