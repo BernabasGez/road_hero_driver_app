@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/features/home/data/models/provider_model.dart';
@@ -13,13 +14,21 @@ class ExploreScreen extends StatefulWidget {
 }
 
 class _ExploreScreenState extends State<ExploreScreen> {
-  List<ProviderModel> allProviders = [];
-  List<ProviderModel> filteredProviders = [];
+  List<ProviderModel> providers = [];
   bool isLoading = true;
-  String selectedFilter = "All";
 
-  // UPDATED: Removed "Verified", added "Towing" and "Repair"
-  final List<String> filters = ["All", "Open Now", "Towing", "Repair"];
+  // FILTERS STATE
+  bool onlyOnline = false;
+  int? selectedServiceId; // null = All
+  double selectedRadius = 500.0; // 500.0 = "All"
+
+  final List<Map<String, dynamic>> services = [
+    {"name": "All", "id": null},
+    {"name": "Towing", "id": 1},
+    {"name": "Repair", "id": 2},
+    {"name": "Tire", "id": 3},
+    {"name": "Fuel", "id": 4},
+  ];
 
   @override
   void initState() {
@@ -30,39 +39,22 @@ class _ExploreScreenState extends State<ExploreScreen> {
   Future<void> _fetchGarages() async {
     setState(() => isLoading = true);
     try {
-      final list = await sl<HomeRemoteSource>().getNearbyProviders();
-      if (mounted) {
+      Position pos = await Geolocator.getCurrentPosition();
+      final list = await sl<HomeRemoteSource>().getNearbyProviders(
+        lat: pos.latitude,
+        lng: pos.longitude,
+        radius: selectedRadius,
+        isOnline: onlyOnline ? true : null,
+        serviceTypeId: selectedServiceId,
+      );
+      if (mounted)
         setState(() {
-          allProviders = list;
-          _applyFilter();
+          providers = list;
           isLoading = false;
         });
-      }
     } catch (e) {
       if (mounted) setState(() => isLoading = false);
     }
-  }
-
-  void _applyFilter() {
-    setState(() {
-      if (selectedFilter == "All") {
-        filteredProviders = allProviders;
-      } else if (selectedFilter == "Open Now") {
-        filteredProviders = allProviders.where((g) => g.isOnline).toList();
-      } else if (selectedFilter == "Towing") {
-        filteredProviders = allProviders
-            .where(
-              (g) => g.services.any((s) => s.toLowerCase().contains("towing")),
-            )
-            .toList();
-      } else if (selectedFilter == "Repair") {
-        filteredProviders = allProviders
-            .where(
-              (g) => g.services.any((s) => s.toLowerCase().contains("repair")),
-            )
-            .toList();
-      }
-    });
   }
 
   @override
@@ -71,43 +63,46 @@ class _ExploreScreenState extends State<ExploreScreen> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text(
-          "Garages Near You",
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          "Explore Garages",
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
         elevation: 0.5,
-        iconTheme: const IconThemeData(color: Colors.black),
       ),
       body: Column(
         children: [
-          // HORIZONTAL FILTERS
-          SizedBox(
-            height: 60,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              itemCount: filters.length,
-              itemBuilder: (context, index) {
-                bool isSelected = selectedFilter == filters[index];
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(filters[index]),
-                    selected: isSelected,
-                    onSelected: (val) {
-                      setState(() => selectedFilter = filters[index]);
-                      _applyFilter();
-                    },
-                    selectedColor: AppColors.primaryBlue,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black,
-                    ),
+          // FILTER HEADER
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: Colors.grey.shade50),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // ONLINE TOGGLE
+                    _buildOnlineToggle(),
+                    // RADIUS DROPDOWN
+                    _buildRadiusDropdown(),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // SERVICE TYPE CHIPS
+                SizedBox(
+                  height: 40,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: services.length,
+                    itemBuilder: (context, index) =>
+                        _serviceChip(services[index]),
                   ),
-                );
-              },
+                ),
+              ],
             ),
           ),
 
+          // RESULTS LIST
           Expanded(
             child: isLoading
                 ? const Center(
@@ -115,18 +110,83 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       color: AppColors.primaryBlue,
                     ),
                   )
-                : filteredProviders.isEmpty
-                ? Center(
-                    child: Text("No $selectedFilter garages found nearby."),
+                : providers.isEmpty
+                ? const Center(
+                    child: Text("No garages found with these filters."),
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.all(16),
-                    itemCount: filteredProviders.length,
+                    itemCount: providers.length,
                     itemBuilder: (context, index) =>
-                        _buildGarageCard(filteredProviders[index]),
+                        _buildGarageCard(providers[index]),
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildOnlineToggle() {
+    return Row(
+      children: [
+        const Text(
+          "Online Only",
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        ),
+        Switch.adaptive(
+          value: onlyOnline,
+          activeColor: Colors.green,
+          onChanged: (val) {
+            setState(() => onlyOnline = val);
+            _fetchGarages();
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRadiusDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<double>(
+          value: selectedRadius,
+          items: const [
+            DropdownMenuItem(value: 10.0, child: Text("10 km")),
+            DropdownMenuItem(value: 15.0, child: Text("15 km")),
+            DropdownMenuItem(value: 20.0, child: Text("20 km")),
+            DropdownMenuItem(value: 500.0, child: Text("All Radius")),
+          ],
+          onChanged: (val) {
+            setState(() => selectedRadius = val!);
+            _fetchGarages();
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _serviceChip(Map<String, dynamic> service) {
+    bool isSelected = selectedServiceId == service['id'];
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(service['name']),
+        selected: isSelected,
+        onSelected: (val) {
+          setState(() => selectedServiceId = service['id']);
+          _fetchGarages();
+        },
+        selectedColor: AppColors.primaryBlue,
+        labelStyle: TextStyle(
+          color: isSelected ? Colors.white : Colors.black,
+          fontSize: 12,
+        ),
       ),
     );
   }
@@ -138,7 +198,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
       child: ListTile(
         contentPadding: const EdgeInsets.all(16),
         leading: CircleAvatar(
-          backgroundColor: AppColors.primaryBlue.withOpacity(0.1),
+          backgroundColor: AppColors.primaryBlue.withAlpha(20),
           child: const Icon(Icons.build, color: AppColors.primaryBlue),
         ),
         title: Row(
@@ -149,25 +209,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
-            // We keep the badge because it builds trust, even if we don't filter by it
-            const Icon(Icons.verified, color: Colors.blue, size: 18),
+            if (garage.isVerified)
+              const Icon(Icons.verified, color: Colors.blue, size: 18),
           ],
         ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "${garage.rating} ⭐ • ${garage.distanceKm.toStringAsFixed(1)} km away",
-            ),
-            Text(
-              garage.isOnline ? "Online" : "Offline",
-              style: TextStyle(
-                color: garage.isOnline ? Colors.green : Colors.grey,
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-              ),
-            ),
-          ],
+        subtitle: Text(
+          "${garage.rating} ⭐ • ${garage.distanceKm.toStringAsFixed(1)} km\nStatus: ${garage.isOnline ? 'Online' : 'Offline'}",
         ),
         trailing: const Icon(Icons.arrow_forward_ios, size: 14),
         onTap: () => Navigator.push(

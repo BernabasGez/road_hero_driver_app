@@ -16,7 +16,41 @@ class HomeRemoteSource {
     return UserModel.fromJson(response.data['data']);
   }
 
-  // 1. CREATE EMERGENCY REQUEST: Solves "Enter a valid URL"
+  // UPDATED: Now supports dynamic Radius, Online status, and Service IDs
+  Future<List<ProviderModel>> getNearbyProviders({
+    required double lat,
+    required double lng,
+    required double radius, // Added dynamic radius
+    bool? isOnline,
+    int? serviceTypeId,
+  }) async {
+    final token = await LocalStorage.getToken();
+    try {
+      final Map<String, dynamic> queryParams = {
+        'lat': lat,
+        'lng': lng,
+        'radius_km': radius,
+      };
+
+      if (isOnline != null) queryParams['is_online'] = isOnline;
+      if (serviceTypeId != null) queryParams['service_type_id'] = serviceTypeId;
+
+      final response = await dio.get(
+        'providers/nearby',
+        queryParameters: queryParams,
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      final dynamic rawResults = response.data['data']['results'];
+      if (rawResults is List)
+        return rawResults.map((json) => ProviderModel.fromJson(json)).toList();
+      return [];
+    } catch (e) {
+      print("FILTERED SEARCH ERROR: $e");
+      return [];
+    }
+  }
+
   Future<int> createRequest({
     required int providerId,
     required int vehicleId,
@@ -26,12 +60,9 @@ class HomeRemoteSource {
     String? imageUrl,
   }) async {
     final token = await LocalStorage.getToken();
-
-    // The server is checking if this looks like a real URL (starting with https)
-    final String safeImageUrl = (imageUrl == null || imageUrl.isEmpty)
+    final String safeUrl = (imageUrl == null || imageUrl.isEmpty)
         ? "https://roadhero.com/placeholder.jpg"
         : imageUrl;
-
     try {
       final response = await dio.post(
         'requests/',
@@ -39,62 +70,28 @@ class HomeRemoteSource {
           "provider_id": providerId,
           "service_type_id": 1,
           "vehicle_id": vehicleId,
-          "description": issueDescription.isEmpty
-              ? "Emergency Assistance"
-              : issueDescription,
           "is_scheduled": false,
-          // Nested location object as seen in your Postman screenshot
-          "location": {"lat": lat, "lng": lng, "address": "Bole, Addis Ababa"},
-          // Fixed: Sending a fake URL instead of "none" to satisfy server validation
-          "photo_url": safeImageUrl,
+          "location": {"lat": lat, "lng": lng, "address": "Current Location"},
+          "description": issueDescription,
+          "photo_url": safeUrl,
+          "voice_note_url": "",
         },
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
-
-      final dynamic resData = response.data['data'];
-      return resData['id'] ?? resData['request_id'] ?? 0;
-    } on DioException catch (e) {
-      print("FINAL ERROR LOG: ${e.response?.data}");
-      throw Exception(e.response?.data.toString() ?? "Validation failed");
-    }
-  }
-
-  Future<Map<String, dynamic>> getUploadUrl(String fileName) async {
-    final token = await LocalStorage.getToken();
-    final response = await dio.post(
-      'utils/upload-url',
-      data: {"file_name": fileName, "content_type": "image/jpeg"},
-      options: Options(headers: {'Authorization': 'Bearer $token'}),
-    );
-    return response.data['data'];
-  }
-
-  Future<List<ProviderModel>> getNearbyProviders() async {
-    final token = await LocalStorage.getToken();
-    try {
-      final response = await dio.get(
-        'providers/nearby',
-        queryParameters: {'lat': 9.0192, 'lng': 38.7525, 'radius_km': 100},
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-      final List data = response.data['data']['results'] ?? [];
-      return data.map((json) => ProviderModel.fromJson(json)).toList();
+      final dynamic data = response.data['data'];
+      return data['id'] ?? data['request_id'] ?? 0;
     } catch (e) {
-      return [];
+      throw Exception("Failed to send request");
     }
   }
 
   Future<List<dynamic>> getMyRequests() async {
     final token = await LocalStorage.getToken();
-    try {
-      final response = await dio.get(
-        'requests/',
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-      return response.data['data'] ?? [];
-    } catch (e) {
-      return [];
-    }
+    final response = await dio.get(
+      'requests/',
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return response.data['data'] ?? [];
   }
 
   Future<Map<String, dynamic>> getRequestDetail(int requestId) async {
@@ -124,6 +121,16 @@ class HomeRemoteSource {
     final response = await dio.post(
       'ai/diagnose',
       data: {"issue_description": description},
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return response.data['data'];
+  }
+
+  Future<Map<String, dynamic>> getUploadUrl(String fileName) async {
+    final token = await LocalStorage.getToken();
+    final response = await dio.post(
+      'utils/upload-url',
+      data: {"file_name": fileName, "content_type": "image/jpeg"},
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );
     return response.data['data'];

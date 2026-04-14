@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart'; // Accurate GPS
 import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/features/home/data/models/provider_model.dart';
@@ -29,17 +30,29 @@ class ConfirmLocationScreen extends StatefulWidget {
 
 class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
   bool isSubmitting = false;
-  LatLng _pickupPosition = const LatLng(9.02497, 38.74689);
+  LatLng _pickupPosition = const LatLng(9.02497, 38.74689); // Starts at default
+
+  @override
+  void initState() {
+    super.initState();
+    _setInitialLocation();
+  }
+
+  Future<void> _setInitialLocation() async {
+    Position position = await Geolocator.getCurrentPosition();
+    setState(() {
+      _pickupPosition = LatLng(position.latitude, position.longitude);
+    });
+  }
 
   Future<void> _submitRequest() async {
     setState(() => isSubmitting = true);
     String? finalImageUrl;
 
     try {
-      // 1. Upload photo if it exists
       if (widget.imageFile != null) {
         final uploadData = await sl<HomeRemoteSource>().getUploadUrl(
-          "emergency_${DateTime.now().millisecondsSinceEpoch}.jpg",
+          "img_${DateTime.now().millisecondsSinceEpoch}.jpg",
         );
         await Dio().put(
           uploadData['upload_url'],
@@ -54,7 +67,7 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
         finalImageUrl = uploadData['file_url'];
       }
 
-      // 2. Submit Emergency Request
+      // SENDING THE ACCURATE POSITION FROM THE MAP CENTER
       final requestId = await sl<HomeRemoteSource>().createRequest(
         providerId: widget.provider.id,
         vehicleId: widget.vehicleId,
@@ -77,7 +90,9 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
               color: Colors.green,
               size: 60,
             ),
-            content: const Text("Emergency request sent! Stay safe."),
+            content: const Text(
+              "Emergency request sent with accurate location!",
+            ),
             actions: [
               SizedBox(
                 width: double.infinity,
@@ -108,17 +123,10 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              "Error: ${e.toString().replaceAll("Exception: ", "")}",
-            ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
       if (mounted) setState(() => isSubmitting = false);
     }
@@ -129,13 +137,16 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
     return Scaffold(
       body: Stack(
         children: [
+          // INTERACTIVE MAP: Drag to set the pin
           FlutterMap(
             options: MapOptions(
               initialCenter: _pickupPosition,
               initialZoom: 16,
               onPositionChanged: (pos, hasGesture) {
-                if (hasGesture && pos.center != null)
+                if (hasGesture && pos.center != null) {
+                  // This updates the real location being sent to the backend!
                   _pickupPosition = pos.center!;
+                }
               },
             ),
             children: [
@@ -145,13 +156,20 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
               ),
             ],
           ),
+
+          // Visual Pin in Center
           const Center(
-            child: Icon(
-              Icons.location_on,
-              size: 50,
-              color: AppColors.primaryBlue,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: 40),
+              child: Icon(
+                Icons.location_on,
+                size: 50,
+                color: AppColors.primaryBlue,
+              ),
             ),
           ),
+          const Center(child: Icon(Icons.add, size: 20, color: Colors.red)),
+
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -164,6 +182,7 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
               ),
             ),
           ),
+
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
@@ -180,8 +199,12 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    "Confirm Emergency Pickup",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    "Adjust map to breakdown spot",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
                   ),
                   const SizedBox(height: 32),
                   SizedBox(
@@ -195,7 +218,7 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
                       child: isSubmitting
                           ? const CircularProgressIndicator(color: Colors.white)
                           : const Text(
-                              "Request Assistance Now",
+                              "Confirm & Send Request",
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,

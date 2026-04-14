@@ -33,17 +33,23 @@ class RequestHistoryDetailScreen extends StatelessWidget {
           final garage =
               data['provider']?['business_name'] ??
               data['provider']?['name'] ??
-              "Garage";
+              "Assigned Garage";
           final vehicle = data['vehicle'];
-          final address = data['incident_address'] ?? "Addis Ababa, Ethiopia";
-          final issue = data['description'] ?? "No details provided.";
+          final address =
+              data['location']?['address'] ??
+              data['incident_address'] ??
+              "Addis Ababa";
+          final issue =
+              data['description'] ??
+              data['issue_description'] ??
+              "No details provided.";
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _detailTile("Assigned Garage", garage, Icons.store),
+                _detailTile("Garage", garage, Icons.store),
                 _detailTile(
                   "Status",
                   data['status'] ?? "PENDING",
@@ -54,7 +60,7 @@ class RequestHistoryDetailScreen extends StatelessWidget {
                 if (vehicle != null)
                   _detailTile(
                     "Vehicle",
-                    "${vehicle['make']?['name'] ?? ''} - ${vehicle['plate_number'] ?? ''}",
+                    "${vehicle['make']?['name'] ?? ''} (${vehicle['plate_number'] ?? ''})",
                     Icons.directions_car,
                   ),
                 const Divider(height: 40),

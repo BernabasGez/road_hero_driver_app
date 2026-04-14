@@ -12,8 +12,7 @@ import 'package:road_hero/features/home/presentation/screens/profile_screen.dart
 import 'package:road_hero/features/home/presentation/screens/virtual_mechanic_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key}); // Removed const from here internally if needed
-
+  const HomeScreen({super.key});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -37,12 +36,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadProfile() async {
     try {
       final data = await sl<HomeRemoteSource>().getProfile();
-      if (mounted) {
+      if (mounted)
         setState(() {
           user = data;
           isLoading = false;
         });
-      }
     } catch (e) {
       if (mounted) setState(() => isLoading = false);
     }
@@ -51,24 +49,21 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _getCurrentLocation() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
+      if (permission == LocationPermission.denied)
         permission = await Geolocator.requestPermission();
-      }
-
       if (permission == LocationPermission.whileInUse ||
           permission == LocationPermission.always) {
         Position position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.low,
           timeLimit: const Duration(seconds: 10),
         );
-        if (mounted) {
+        if (mounted)
           setState(() {
             _currentPosition = LatLng(position.latitude, position.longitude);
           });
-        }
       }
     } catch (e) {
-      debugPrint("GPS Timeout: $e");
+      debugPrint("GPS Timeout");
     }
   }
 
@@ -132,7 +127,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     Expanded(
                       child: Text(
                         "Live Location Active",
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   ],
@@ -150,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   topLeft: Radius.circular(30),
                   topRight: Radius.circular(30),
                 ),
+                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20)],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -224,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         CircleAvatar(
           radius: 28,
-          backgroundColor: Colors.blue.withAlpha(15),
+          backgroundColor: Colors.blue.withAlpha(20),
           child: Icon(icon, color: AppColors.primaryBlue),
         ),
         const SizedBox(height: 8),
