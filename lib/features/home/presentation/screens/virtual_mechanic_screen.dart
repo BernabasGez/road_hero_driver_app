@@ -13,13 +13,18 @@ class VirtualMechanicScreen extends StatefulWidget {
 class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
   final TextEditingController _controller = TextEditingController();
   final List<Map<String, dynamic>> _messages = [
-    {"role": "ai", "text": "Hello! Describe the issue your car is having."},
+    {
+      "role": "ai",
+      "text":
+          "Hello! I'm your AI Mechanic. Describe the noise or issue your car is having.",
+    },
   ];
   bool isTyping = false;
 
   Future<void> _sendMessage() async {
     String text = _controller.text.trim();
     if (text.isEmpty) return;
+
     setState(() {
       _messages.add({"role": "user", "text": text});
       _controller.clear();
@@ -31,7 +36,9 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
       setState(() {
         _messages.add({
           "role": "ai",
-          "text": result['ai_response'] ?? "I'm checking that...",
+          "text":
+              result['ai_response'] ??
+              "I'm not quite sure. Can you explain more?",
           "action": result['requires_mechanic'] == true
               ? result['recommended_service_type']
               : null,
@@ -42,7 +49,8 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
       setState(() {
         _messages.add({
           "role": "ai",
-          "text": "Connection issue. Please try again.",
+          "text":
+              "I'm having trouble connecting. Try again when your signal is stronger.",
         });
         isTyping = false;
       });
@@ -53,7 +61,7 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Virtual Mechanic"),
+        title: const Text("AI Assistant"),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0.5,
@@ -64,7 +72,38 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
             child: ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: _messages.length,
-              itemBuilder: (context, index) => _buildBubble(_messages[index]),
+              itemBuilder: (context, index) {
+                final msg = _messages[index];
+                bool isAi = msg['role'] == 'ai';
+                return Align(
+                  alignment: isAi
+                      ? Alignment.centerLeft
+                      : Alignment.centerRight,
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isAi
+                          ? Colors.grey.shade100
+                          : AppColors.primaryBlue,
+                      borderRadius: BorderRadius.circular(16).copyWith(
+                        bottomLeft: isAi
+                            ? Radius.zero
+                            : const Radius.circular(16),
+                        bottomRight: isAi
+                            ? const Radius.circular(16)
+                            : Radius.zero,
+                      ),
+                    ),
+                    child: Text(
+                      msg['text'],
+                      style: TextStyle(
+                        color: isAi ? Colors.black : Colors.white,
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
           if (isTyping)
@@ -78,45 +117,21 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
     );
   }
 
-  Widget _buildBubble(Map<String, dynamic> msg) {
-    bool isAi = msg['role'] == 'ai';
-    return Align(
-      alignment: isAi ? Alignment.centerLeft : Alignment.centerRight,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isAi ? Colors.grey.shade100 : AppColors.primaryBlue,
-          borderRadius: BorderRadius.circular(16).copyWith(
-            bottomLeft: isAi ? Radius.zero : const Radius.circular(16),
-            bottomRight: isAi ? const Radius.circular(16) : Radius.zero,
-          ),
-        ),
-        child: Text(
-          msg['text'],
-          style: TextStyle(color: isAi ? Colors.black : Colors.white),
-        ),
-      ),
-    );
-  }
-
   Widget _buildInput() {
     return Container(
       padding: const EdgeInsets.all(16),
-      color: Colors.white,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
       child: Row(
         children: [
           Expanded(
             child: TextField(
               controller: _controller,
-              decoration: InputDecoration(
-                hintText: "Type issue...",
-                filled: true,
-                fillColor: Colors.grey.shade50,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
-                  borderSide: BorderSide.none,
-                ),
+              decoration: const InputDecoration(
+                hintText: "Describe the issue...",
+                border: OutlineInputBorder(),
               ),
             ),
           ),

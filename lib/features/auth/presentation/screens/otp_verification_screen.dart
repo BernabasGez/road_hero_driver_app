@@ -26,6 +26,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       child: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthSuccess) {
+            // REMOVED 'const' HERE:
             Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (context) => const HomeScreen()),

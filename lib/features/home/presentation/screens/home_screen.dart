@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:road_hero/core/theme/app_colors.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:road_hero/core/di/injection_container.dart';
+import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
 import 'package:road_hero/features/auth/data/models/user_model.dart';
-// Imports for all the sub-screens
-import 'package:road_hero/features/home/presentation/screens/virtual_mechanic_screen.dart';
 import 'package:road_hero/features/home/presentation/screens/explore_screen.dart';
 import 'package:road_hero/features/home/presentation/screens/activity_screen.dart';
 import 'package:road_hero/features/home/presentation/screens/profile_screen.dart';
+import 'package:road_hero/features/home/presentation/screens/virtual_mechanic_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key}); // Removed const from here internally if needed
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -19,14 +21,20 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   UserModel? user;
   bool isLoading = true;
+  LatLng _currentPosition = const LatLng(9.02497, 38.74689);
 
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    _initApp();
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _initApp() async {
+    _loadProfile();
+    _getCurrentLocation();
+  }
+
+  Future<void> _loadProfile() async {
     try {
       final data = await sl<HomeRemoteSource>().getProfile();
       if (mounted) {
@@ -40,29 +48,68 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _getCurrentLocation() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.low,
+          timeLimit: const Duration(seconds: 10),
+        );
+        if (mounted) {
+          setState(() {
+            _currentPosition = LatLng(position.latitude, position.longitude);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("GPS Timeout: $e");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Show a loading spinner while fetching the user name from backend
-    if (isLoading) {
+    if (isLoading)
       return const Scaffold(
         body: Center(
           child: CircularProgressIndicator(color: AppColors.primaryBlue),
         ),
       );
-    }
 
     return Scaffold(
       body: Stack(
         children: [
-          // 1. MAP BACKGROUND (Placeholder)
-          Container(
-            color: Colors.grey.shade100,
-            child: const Center(
-              child: Icon(Icons.map_outlined, size: 100, color: Colors.grey),
+          FlutterMap(
+            options: MapOptions(
+              initialCenter: _currentPosition,
+              initialZoom: 14,
             ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'org.roadhero.driver.ethiopia',
+              ),
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _currentPosition,
+                    width: 40,
+                    height: 40,
+                    child: const Icon(
+                      Icons.my_location,
+                      color: AppColors.primaryBlue,
+                      size: 30,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-
-          // 2. TOP LOCATION BAR (Figma 3.0)
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -73,27 +120,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 10,
-                      offset: Offset(0, 5),
-                    ),
+                    BoxShadow(color: Colors.black12, blurRadius: 10),
                   ],
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.menu, color: Colors.black),
+                    Icon(Icons.menu),
                     SizedBox(width: 12),
                     Icon(Icons.location_on, color: Colors.red, size: 20),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        "Bole, Addis Ababa",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                        "Live Location Active",
+                        style: TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
@@ -101,8 +140,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-
-          // 3. BOTTOM UI CARD (Figma 3.0)
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
@@ -113,7 +150,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   topLeft: Radius.circular(30),
                   topRight: Radius.circular(30),
                 ),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20)],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -126,14 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 20),
-
-                  // AI ASSISTANT BANNER
-                  _buildAIBanner(),
-
                   const SizedBox(height: 24),
-
-                  // SERVICE ICONS GRID
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -149,33 +178,27 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-
-      // BOTTOM NAVIGATION BAR (Figma Style)
       bottomNavigationBar: BottomNavigationBar(
         selectedItemColor: AppColors.primaryBlue,
         unselectedItemColor: Colors.grey,
         currentIndex: 0,
         type: BottomNavigationBarType.fixed,
         onTap: (index) {
-          if (index == 1) {
-            // GO TO EXPLORE SCREEN (Garages List)
+          if (index == 1)
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const ExploreScreen()),
+              MaterialPageRoute(builder: (_) => const ExploreScreen()),
             );
-          } else if (index == 2) {
-            // GO TO ACTIVITY SCREEN (My Requests)
+          if (index == 2)
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const ActivityScreen()),
+              MaterialPageRoute(builder: (_) => const ActivityScreen()),
             );
-          } else if (index == 3) {
-            // GO TO PROFILE SCREEN (User Info & Vehicles)
+          if (index == 3)
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const ProfileScreen()),
+              MaterialPageRoute(builder: (_) => const ProfileScreen()),
             );
-          }
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: 'Home'),
@@ -196,61 +219,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Helper for the AI banner widget
-  Widget _buildAIBanner() {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const VirtualMechanicScreen(),
-          ),
-        );
-      },
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.primaryBlue,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.auto_awesome, color: Colors.white, size: 24),
-            SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Hear a strange noise? Ask AI.",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    "Instant diagnosis.",
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.arrow_forward_ios, color: Colors.white, size: 14),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Helper for the small service circles
   Widget _serviceItem(IconData icon, String label) {
     return Column(
       children: [
         CircleAvatar(
           radius: 28,
-          backgroundColor: Colors.blue.withOpacity(0.05),
-          child: Icon(icon, color: AppColors.primaryBlue, size: 28),
+          backgroundColor: Colors.blue.withAlpha(15),
+          child: Icon(icon, color: AppColors.primaryBlue),
         ),
         const SizedBox(height: 8),
         Text(

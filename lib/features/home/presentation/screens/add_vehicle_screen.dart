@@ -54,10 +54,11 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
       );
       if (mounted) Navigator.pop(context, true); // Return true to refresh list
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
     } finally {
       if (mounted) setState(() => isSubmitting = false);
     }

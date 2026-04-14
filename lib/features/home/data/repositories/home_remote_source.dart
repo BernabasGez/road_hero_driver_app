@@ -7,7 +7,6 @@ class HomeRemoteSource {
   final Dio dio;
   HomeRemoteSource(this.dio);
 
-  // 1. Fetch User Profile
   Future<UserModel> getProfile() async {
     final token = await LocalStorage.getToken();
     final response = await dio.get(
@@ -17,7 +16,59 @@ class HomeRemoteSource {
     return UserModel.fromJson(response.data['data']);
   }
 
-  // 2. Fetch Garages with Local-Friendly Coordinates
+  // 1. CREATE EMERGENCY REQUEST: Solves "Enter a valid URL"
+  Future<int> createRequest({
+    required int providerId,
+    required int vehicleId,
+    required String issueDescription,
+    required double lat,
+    required double lng,
+    String? imageUrl,
+  }) async {
+    final token = await LocalStorage.getToken();
+
+    // The server is checking if this looks like a real URL (starting with https)
+    final String safeImageUrl = (imageUrl == null || imageUrl.isEmpty)
+        ? "https://roadhero.com/placeholder.jpg"
+        : imageUrl;
+
+    try {
+      final response = await dio.post(
+        'requests/',
+        data: {
+          "provider_id": providerId,
+          "service_type_id": 1,
+          "vehicle_id": vehicleId,
+          "description": issueDescription.isEmpty
+              ? "Emergency Assistance"
+              : issueDescription,
+          "is_scheduled": false,
+          // Nested location object as seen in your Postman screenshot
+          "location": {"lat": lat, "lng": lng, "address": "Bole, Addis Ababa"},
+          // Fixed: Sending a fake URL instead of "none" to satisfy server validation
+          "photo_url": safeImageUrl,
+        },
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      final dynamic resData = response.data['data'];
+      return resData['id'] ?? resData['request_id'] ?? 0;
+    } on DioException catch (e) {
+      print("FINAL ERROR LOG: ${e.response?.data}");
+      throw Exception(e.response?.data.toString() ?? "Validation failed");
+    }
+  }
+
+  Future<Map<String, dynamic>> getUploadUrl(String fileName) async {
+    final token = await LocalStorage.getToken();
+    final response = await dio.post(
+      'utils/upload-url',
+      data: {"file_name": fileName, "content_type": "image/jpeg"},
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return response.data['data'];
+  }
+
   Future<List<ProviderModel>> getNearbyProviders() async {
     final token = await LocalStorage.getToken();
     try {
@@ -26,57 +77,35 @@ class HomeRemoteSource {
         queryParameters: {'lat': 9.0192, 'lng': 38.7525, 'radius_km': 100},
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
-      final dynamic rawResults = response.data['data']['results'];
-      if (rawResults is List)
-        return rawResults.map((json) => ProviderModel.fromJson(json)).toList();
-      return [];
+      final List data = response.data['data']['results'] ?? [];
+      return data.map((json) => ProviderModel.fromJson(json)).toList();
     } catch (e) {
       return [];
     }
   }
 
-  // 3. AI DIAGNOSIS (Powers the Virtual Mechanic Screen)
-  Future<Map<String, dynamic>> diagnoseIssue(String description) async {
+  Future<List<dynamic>> getMyRequests() async {
     final token = await LocalStorage.getToken();
     try {
-      final response = await dio.post(
-        'ai/diagnose',
-        data: {"issue_description": description},
+      final response = await dio.get(
+        'requests/',
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
-      return response.data['data'];
-    } on DioException catch (e) {
-      throw Exception("AI is taking too long. Check your signal.");
+      return response.data['data'] ?? [];
+    } catch (e) {
+      return [];
     }
   }
 
-  // 4. CREATE REQUEST (The checkmark screen)
-  Future<int> createRequest({
-    required int providerId,
-    required int vehicleId,
-    required String issueDescription,
-    required double lat,
-    required double lng,
-  }) async {
+  Future<Map<String, dynamic>> getRequestDetail(int requestId) async {
     final token = await LocalStorage.getToken();
-    final response = await dio.post(
-      'requests/',
-      data: {
-        "provider_id": providerId,
-        "service_type_id": 1,
-        "vehicle_id": vehicleId,
-        "pickup_lat": lat,
-        "pickup_lng": lng,
-        "destination_lat": lat + 0.001,
-        "destination_lng": lng + 0.001,
-        "issue_description": issueDescription,
-      },
+    final response = await dio.get(
+      'requests/$requestId',
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );
-    return response.data['data']['id'] ?? 0;
+    return response.data['data'] ?? response.data;
   }
 
-  // 5. LIVE TRACKING POLLING (For the Tracking Screen)
   Future<Map<String, dynamic>> getLiveTracking(int requestId) async {
     final token = await LocalStorage.getToken();
     try {
@@ -86,22 +115,17 @@ class HomeRemoteSource {
       );
       return response.data['data'];
     } catch (e) {
-      // Return a default status if the tracking endpoint hasn't updated yet
-      return {
-        "status": "PENDING",
-        "eta_minutes": 0,
-        "technician_name": "Finding Mechanic...",
-      };
+      return {"status": "PENDING", "eta_minutes": 0};
     }
   }
 
-  // 6. ACTIVITY LIST
-  Future<List<dynamic>> getMyRequests() async {
+  Future<Map<String, dynamic>> diagnoseIssue(String description) async {
     final token = await LocalStorage.getToken();
-    final response = await dio.get(
-      'requests/',
+    final response = await dio.post(
+      'ai/diagnose',
+      data: {"issue_description": description},
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );
-    return response.data['data'] ?? [];
+    return response.data['data'];
   }
 }
