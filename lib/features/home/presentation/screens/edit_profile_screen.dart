@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/features/auth/data/models/user_model.dart';
-import 'package:road_hero/features/home/data/repositories/profile_remote_source.dart';
+import 'package:road_hero/features/home/data/datasources/home_remote_source.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final UserModel user;
@@ -25,15 +25,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _save() async {
     setState(() => isSaving = true);
     try {
-      await sl<ProfileRemoteSource>().updateProfile(
-        _nameController.text.trim(),
-      );
+      // Use HomeRemoteSource. It expects a Map of fields to update.
+      await sl<HomeRemoteSource>().updateProfile({
+        "full_name": _nameController.text.trim(),
+      });
+
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted)
+      if (mounted) {
+        // Wrapped in a block {} to fix the 'enclose in a block' info
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text("Error updating profile")));
+        ).showSnackBar(const SnackBar(content: Text("Error updating profile")));
+      }
     } finally {
       if (mounted) setState(() => isSaving = false);
     }

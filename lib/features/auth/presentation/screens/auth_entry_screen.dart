@@ -68,7 +68,10 @@ class AuthEntryScreen extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const SignupScreen(),
+                          builder: (context) => SignupScreen(
+                            onLogin: () => Navigator.pop(context), // Added this
+                            onRegistered: (phone) {}, // Added this
+                          ),
                         ),
                       );
                     },
@@ -100,7 +103,11 @@ class AuthEntryScreen extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const LoginScreen(),
+                          builder: (context) => LoginScreen(
+                            onSignup: () =>
+                                Navigator.pop(context), // Added this
+                            onForgotPassword: () {}, // Added this
+                          ),
                         ),
                       );
                     },

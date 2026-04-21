@@ -1,85 +1,153 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../domain/usecases/register_usecase.dart';
-import '../../data/repositories/auth_remote_source.dart';
-import '../../../../core/di/injection_container.dart';
+import '../../domain/repositories/auth_repository.dart';
 
-abstract class AuthEvent {}
+// ─── Events ───────────────────────────────────────────
+sealed class AuthEvent {}
 
-class SignUpSubmitted extends AuthEvent {
-  final String name, phone, password;
-  SignUpSubmitted(this.name, this.phone, this.password);
+class CheckSession extends AuthEvent {}
+
+class RegisterSubmitted extends AuthEvent {
+  final String phone;
+  final String name;
+  final String password;
+  final Map<String, dynamic>? vehicle;
+  RegisterSubmitted({required this.phone, required this.name, required this.password, this.vehicle});
 }
 
 class VerifyOtpSubmitted extends AuthEvent {
-  final String phone, otp;
-  VerifyOtpSubmitted(this.phone, this.otp);
+  final String phone;
+  final String otp;
+  VerifyOtpSubmitted({required this.phone, required this.otp});
 }
 
 class LoginSubmitted extends AuthEvent {
-  final String phone, password;
-  LoginSubmitted(this.phone, this.password);
+  final String phone;
+  final String password;
+  LoginSubmitted({required this.phone, required this.password});
 }
 
-abstract class AuthState {}
+class LogoutRequested extends AuthEvent {}
+
+class ForgotPasswordSubmitted extends AuthEvent {
+  final String phone;
+  ForgotPasswordSubmitted({required this.phone});
+}
+
+class ResetPasswordSubmitted extends AuthEvent {
+  final String phone;
+  final String otp;
+  final String newPassword;
+  ResetPasswordSubmitted({required this.phone, required this.otp, required this.newPassword});
+}
+
+// ─── States ───────────────────────────────────────────
+sealed class AuthState {}
 
 class AuthInitial extends AuthState {}
-
 class AuthLoading extends AuthState {}
+class Authenticated extends AuthState {}
+class Unauthenticated extends AuthState {}
 
-class AuthSuccess extends AuthState {
-  final String message;
-  AuthSuccess(this.message);
+class RegistrationSuccess extends AuthState {
+  final String phone;
+  RegistrationSuccess(this.phone);
 }
+
+class OtpVerified extends AuthState {}
+
+class ForgotPasswordSent extends AuthState {
+  final String phone;
+  ForgotPasswordSent(this.phone);
+}
+
+class PasswordResetSuccess extends AuthState {}
 
 class AuthError extends AuthState {
-  final String error;
-  AuthError(this.error);
+  final String message;
+  AuthError(this.message);
 }
 
+// ─── Bloc ─────────────────────────────────────────────
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
-  final RegisterUseCase registerUseCase;
+  final AuthRepository repository;
 
-  AuthBloc({required this.registerUseCase}) : super(AuthInitial()) {
-    on<SignUpSubmitted>((event, emit) async {
-      emit(AuthLoading());
-      try {
-        await registerUseCase(
-          RegisterParams(
-            fullName: event.name,
-            phoneNumber: event.phone,
-            password: event.password,
-          ),
-        );
-        emit(AuthSuccess("OTP Sent Successfully!"));
-      } catch (e) {
-        emit(AuthError(e.toString().replaceAll("Exception: ", "")));
-      }
-    });
+  AuthBloc(this.repository) : super(AuthInitial()) {
+    on<CheckSession>(_onCheckSession);
+    on<RegisterSubmitted>(_onRegister);
+    on<VerifyOtpSubmitted>(_onVerifyOtp);
+    on<LoginSubmitted>(_onLogin);
+    on<LogoutRequested>(_onLogout);
+    on<ForgotPasswordSubmitted>(_onForgotPassword);
+    on<ResetPasswordSubmitted>(_onResetPassword);
+  }
 
-    on<VerifyOtpSubmitted>((event, emit) async {
-      emit(AuthLoading());
-      try {
-        await sl<AuthRemoteSource>().verifyOtp(
-          phone: event.phone,
-          otp: event.otp,
-        );
-        emit(AuthSuccess("Verification Successful!"));
-      } catch (e) {
-        emit(AuthError(e.toString().replaceAll("Exception: ", "")));
-      }
-    });
+  Future<void> _onCheckSession(CheckSession event, Emitter<AuthState> emit) async {
+    final hasSession = await repository.hasSession();
+    emit(hasSession ? Authenticated() : Unauthenticated());
+  }
 
-    on<LoginSubmitted>((event, emit) async {
-      emit(AuthLoading());
-      try {
-        await sl<AuthRemoteSource>().login(
-          phone: event.phone,
-          password: event.password,
-        );
-        emit(AuthSuccess("Login Successful!"));
-      } catch (e) {
-        emit(AuthError(e.toString().replaceAll("Exception: ", "")));
-      }
-    });
+  Future<void> _onRegister(RegisterSubmitted event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      await repository.register(
+        phone: event.phone,
+        name: event.name,
+        password: event.password,
+        vehicle: event.vehicle,
+      );
+      emit(RegistrationSuccess(event.phone));
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
+  }
+
+  Future<void> _onVerifyOtp(VerifyOtpSubmitted event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      await repository.verifyOtp(phone: event.phone, otp: event.otp);
+      emit(OtpVerified());
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
+  }
+
+  Future<void> _onLogin(LoginSubmitted event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      await repository.login(phone: event.phone, password: event.password);
+      emit(Authenticated());
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
+  }
+
+  Future<void> _onLogout(LogoutRequested event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    await repository.logout();
+    emit(Unauthenticated());
+  }
+
+  Future<void> _onForgotPassword(ForgotPasswordSubmitted event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      await repository.forgotPassword(phone: event.phone);
+      emit(ForgotPasswordSent(event.phone));
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
+  }
+
+  Future<void> _onResetPassword(ResetPasswordSubmitted event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      await repository.resetPassword(
+        phone: event.phone,
+        otp: event.otp,
+        newPassword: event.newPassword,
+      );
+      emit(PasswordResetSuccess());
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
   }
 }

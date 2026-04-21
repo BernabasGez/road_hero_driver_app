@@ -56,11 +56,15 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                 height: 55,
                 child: ElevatedButton(
                   onPressed: () {
-                    // This is where we move to the next screen!
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const OnboardingScreen(),
+                        builder: (context) => OnboardingScreen(
+                          onComplete: () {
+                            // Tell the app to go to the entry screen when onboarding is done
+                            Navigator.pushReplacementNamed(context, '/login');
+                          },
+                        ),
                       ),
                     );
                   },
@@ -101,7 +105,10 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blue.withOpacity(0.05) : Colors.white,
+          // Changed .withOpacity to .withValues
+          color: isSelected
+              ? Colors.blue.withValues(alpha: 0.05)
+              : Colors.white,
           border: Border.all(
             color: isSelected ? AppColors.primaryBlue : Colors.grey.shade300,
             width: 2,

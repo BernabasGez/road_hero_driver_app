@@ -1,19 +1,23 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart'; // Accurate GPS
-import 'package:road_hero/core/theme/app_colors.dart';
-import 'package:road_hero/core/di/injection_container.dart';
-import 'package:road_hero/features/home/data/models/provider_model.dart';
-import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
-import 'package:road_hero/features/home/presentation/screens/tracking_screen.dart';
+import 'package:geolocator/geolocator.dart';
+import '../../../../core/config/app_config.dart';
+import '../../../../core/di/injection_container.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_dimensions.dart';
+import '../../../../core/widgets/app_button.dart';
+import '../../data/datasources/home_remote_source.dart';
+import '../../data/models/provider_model.dart';
+import 'tracking_screen.dart';
 
 class ConfirmLocationScreen extends StatefulWidget {
   final ProviderModel provider;
   final String description;
   final int vehicleId;
+  final int serviceTypeId;
   final File? imageFile;
 
   const ConfirmLocationScreen({
@@ -21,6 +25,7 @@ class ConfirmLocationScreen extends StatefulWidget {
     required this.provider,
     required this.description,
     required this.vehicleId,
+    required this.serviceTypeId,
     this.imageFile,
   });
 
@@ -29,106 +34,73 @@ class ConfirmLocationScreen extends StatefulWidget {
 }
 
 class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
-  bool isSubmitting = false;
-  LatLng _pickupPosition = const LatLng(9.02497, 38.74689); // Starts at default
+  bool _submitting = false;
+  LatLng _position = const LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
 
   @override
   void initState() {
     super.initState();
-    _setInitialLocation();
+    _setLocation();
   }
 
-  Future<void> _setInitialLocation() async {
-    Position position = await Geolocator.getCurrentPosition();
-    setState(() {
-      _pickupPosition = LatLng(position.latitude, position.longitude);
-    });
-  }
-
-  Future<void> _submitRequest() async {
-    setState(() => isSubmitting = true);
-    String? finalImageUrl;
-
+  Future<void> _setLocation() async {
     try {
-      if (widget.imageFile != null) {
-        final uploadData = await sl<HomeRemoteSource>().getUploadUrl(
-          "img_${DateTime.now().millisecondsSinceEpoch}.jpg",
-        );
-        await Dio().put(
-          uploadData['upload_url'],
-          data: widget.imageFile!.openRead(),
-          options: Options(
-            headers: {
-              "Content-Type": "image/jpeg",
-              "Content-Length": widget.imageFile!.lengthSync(),
-            },
-          ),
-        );
-        finalImageUrl = uploadData['file_url'];
-      }
+      final pos = await Geolocator.getCurrentPosition();
+      setState(() => _position = LatLng(pos.latitude, pos.longitude));
+    } catch (_) {}
+  }
 
-      // SENDING THE ACCURATE POSITION FROM THE MAP CENTER
-      final requestId = await sl<HomeRemoteSource>().createRequest(
+  Future<void> _submit() async {
+    setState(() => _submitting = true);
+    try {
+      final result = await sl<HomeRemoteSource>().createRequest(
         providerId: widget.provider.id,
+        serviceTypeId: widget.serviceTypeId,
         vehicleId: widget.vehicleId,
-        issueDescription: widget.description,
-        imageUrl: finalImageUrl,
-        lat: _pickupPosition.latitude,
-        lng: _pickupPosition.longitude,
+        description: widget.description,
+        lat: _position.latitude,
+        lng: _position.longitude,
+        photo: widget.imageFile,
       );
 
       if (mounted) {
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: const Icon(
-              Icons.check_circle,
-              color: Colors.green,
-              size: 60,
-            ),
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Icon(Icons.check_circle_outline, color: AppColors.success, size: 56),
             content: const Text(
-              "Emergency request sent with accurate location!",
+              'Your request has been sent!\nThe garage will respond shortly.',
+              textAlign: TextAlign.center,
             ),
             actions: [
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => TrackingScreen(
-                          requestId: requestId,
-                          garageName: widget.provider.businessName,
-                        ),
+              AppButton(
+                label: 'Track Request',
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TrackingScreen(
+                        requestId: result.id,
+                        garageName: widget.provider.businessName,
                       ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryBlue,
-                  ),
-                  child: const Text(
-                    "Track Now",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
+                    ),
+                  );
+                },
               ),
             ],
           ),
         );
       }
     } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error));
+      }
     } finally {
-      if (mounted) setState(() => isSubmitting = false);
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -137,94 +109,107 @@ class _ConfirmLocationScreenState extends State<ConfirmLocationScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // INTERACTIVE MAP: Drag to set the pin
+          // Map
           FlutterMap(
             options: MapOptions(
-              initialCenter: _pickupPosition,
+              initialCenter: _position,
               initialZoom: 16,
               onPositionChanged: (pos, hasGesture) {
-                if (hasGesture && pos.center != null) {
-                  // This updates the real location being sent to the backend!
-                  _pickupPosition = pos.center!;
+                if (hasGesture) {
+                  _position = pos.center;
                 }
               },
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'org.roadhero.driver',
+                urlTemplate: AppConfig.mapTileUrl,
+                userAgentPackageName: AppConfig.mapUserAgent,
               ),
             ],
           ),
-
-          // Visual Pin in Center
-          const Center(
+          // Center pin
+          Center(
             child: Padding(
-              padding: EdgeInsets.only(bottom: 40),
-              child: Icon(
-                Icons.location_on,
-                size: 50,
-                color: AppColors.primaryBlue,
+              padding: const EdgeInsets.only(bottom: 48),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.3),
+                          blurRadius: 12,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.location_on, color: Colors.white, size: 28),
+                  ),
+                  Container(width: 3, height: 16, color: AppColors.primary),
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.3),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          const Center(child: Icon(Icons.add, size: 20, color: Colors.red)),
-
+          // Back button
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: CircleAvatar(
-                backgroundColor: Colors.white,
+              padding: const EdgeInsets.all(AppDimensions.md),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: AppColors.surface,
+                  shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: AppColors.cardShadow, blurRadius: 8)],
+                ),
                 child: IconButton(
+                  icon: const Icon(Icons.arrow_back_ios_new, size: 18),
                   onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.arrow_back, color: Colors.black),
                 ),
               ),
             ),
           ),
-
+          // Bottom sheet
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
-              padding: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(AppDimensions.lg),
               decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(30),
-                  topRight: Radius.circular(30),
-                ),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20)],
+                color: AppColors.surface,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [BoxShadow(color: AppColors.cardShadow, blurRadius: 16)],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    "Adjust map to breakdown spot",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  const SizedBox(height: 32),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      onPressed: isSubmitting ? null : _submitRequest,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.actionOrange,
-                      ),
-                      child: isSubmitting
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text(
-                              "Confirm & Send Request",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                    ),
+                  const SizedBox(height: AppDimensions.md),
+                  Text(
+                    'Drag map to set breakdown location',
+                    style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: AppDimensions.lg),
+                  AppButton(
+                    label: 'Confirm & Send Request',
+                    isLoading: _submitting,
+                    onPressed: _submit,
                   ),
                 ],
               ),

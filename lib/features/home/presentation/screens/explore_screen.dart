@@ -1,228 +1,370 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:road_hero/core/di/injection_container.dart';
-import 'package:road_hero/core/theme/app_colors.dart';
-import 'package:road_hero/features/home/data/models/provider_model.dart';
-import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
-import 'package:road_hero/features/home/presentation/screens/garage_profile_screen.dart';
+import 'package:latlong2/latlong.dart';
+import '../../../../core/config/app_config.dart';
+import '../../../../core/di/injection_container.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_dimensions.dart';
+import '../../../../core/widgets/status_badge.dart';
+import '../../../../core/widgets/skeleton_loader.dart';
+import '../../../../core/widgets/error_view.dart';
+import '../../data/datasources/home_remote_source.dart';
+import '../../data/models/provider_model.dart';
+import 'garage_profile_screen.dart';
 
 class ExploreScreen extends StatefulWidget {
-  const ExploreScreen({super.key});
+  final int? preFilterServiceTypeId;
+  const ExploreScreen({super.key, this.preFilterServiceTypeId});
 
   @override
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
 class _ExploreScreenState extends State<ExploreScreen> {
-  List<ProviderModel> providers = [];
-  bool isLoading = true;
+  List<ProviderModel> _providers = [];
+  bool _loading = true;
+  String? _error;
 
-  // FILTERS STATE
-  bool onlyOnline = false;
-  int? selectedServiceId; // null = All
-  double selectedRadius = 500.0; // 500.0 = "All"
+  // Filter States
+  bool _onlineOnly = false;
+  int? _selectedServiceType;
+  String _sortBy = 'distance';
 
-  final List<Map<String, dynamic>> services = [
-    {"name": "All", "id": null},
-    {"name": "Towing", "id": 1},
-    {"name": "Repair", "id": 2},
-    {"name": "Tire", "id": 3},
-    {"name": "Fuel", "id": 4},
-  ];
+  LatLng _position = const LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
+  List<Map<String, dynamic>> _serviceTypes = [];
+  bool _showMap = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchGarages();
+    _selectedServiceType = widget.preFilterServiceTypeId;
+    _init();
   }
 
-  Future<void> _fetchGarages() async {
-    setState(() => isLoading = true);
+  Future<void> _init() async {
     try {
-      Position pos = await Geolocator.getCurrentPosition();
-      final list = await sl<HomeRemoteSource>().getNearbyProviders(
-        lat: pos.latitude,
-        lng: pos.longitude,
-        radius: selectedRadius,
-        isOnline: onlyOnline ? true : null,
-        serviceTypeId: selectedServiceId,
+      // 1. Instant check for last location
+      Position? lastPos = await Geolocator.getLastKnownPosition();
+      if (lastPos != null) {
+        _position = LatLng(lastPos.latitude, lastPos.longitude);
+      }
+
+      // 2. Refresh location with a strict 4-second timeout to avoid infinite loading
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.low,
+        timeLimit: const Duration(seconds: 4),
       );
-      if (mounted)
-        setState(() {
-          providers = list;
-          isLoading = false;
-        });
+      _position = LatLng(pos.latitude, pos.longitude);
     } catch (e) {
-      if (mounted) setState(() => isLoading = false);
+      debugPrint("Location fallback used: $e");
+    }
+
+    _loadServiceTypes();
+    _search();
+  }
+
+  Future<void> _loadServiceTypes() async {
+    try {
+      final types = await sl<HomeRemoteSource>().getServiceTypes();
+      if (mounted) setState(() => _serviceTypes = types);
+    } catch (_) {}
+  }
+
+  Future<void> _search() async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final providers = await sl<HomeRemoteSource>()
+          .getNearbyProviders(
+            lat: _position.latitude,
+            lng: _position.longitude,
+            radiusKm: 500.0,
+            isOnline: _onlineOnly ? true : null,
+            serviceTypeId: _selectedServiceType,
+            sortBy: _sortBy,
+          )
+          .timeout(const Duration(seconds: 10)); // Prevent API hang
+
+      if (mounted) {
+        setState(() {
+          _providers = providers;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = "Connection timeout. Tap to retry.";
+          _loading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text(
-          "Explore Garages",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0.5,
+        title: const Text('Explore Garages'),
+        actions: [
+          IconButton(
+            icon: Icon(_showMap ? Icons.list_outlined : Icons.map_outlined),
+            onPressed: () => setState(() => _showMap = !_showMap),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // FILTER HEADER
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.grey.shade50),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    // ONLINE TOGGLE
-                    _buildOnlineToggle(),
-                    // RADIUS DROPDOWN
-                    _buildRadiusDropdown(),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // SERVICE TYPE CHIPS
-                SizedBox(
-                  height: 40,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: services.length,
-                    itemBuilder: (context, index) =>
-                        _serviceChip(services[index]),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // RESULTS LIST
+          _buildFilters(),
           Expanded(
-            child: isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(
-                      color: AppColors.primaryBlue,
-                    ),
+            child: _loading
+                ? const SkeletonList()
+                : _error != null
+                ? ErrorView(message: _error!, onRetry: _search)
+                : _providers.isEmpty
+                ? const EmptyView(
+                    title: 'No garages found',
+                    subtitle: 'Try changing your filters',
+                    icon: Icons.search_off_outlined,
                   )
-                : providers.isEmpty
-                ? const Center(
-                    child: Text("No garages found with these filters."),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: providers.length,
-                    itemBuilder: (context, index) =>
-                        _buildGarageCard(providers[index]),
-                  ),
+                : _showMap
+                ? _buildMapView()
+                : _buildListView(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildOnlineToggle() {
-    return Row(
-      children: [
-        const Text(
-          "Online Only",
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+  // --- REFINED CLEAN FILTERS ---
+  Widget _buildFilters() {
+    return Container(
+      color: AppColors.surface,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        children: [
+          // ROW 1: Toggles and Sorting
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Online Now'),
+                  selected: _onlineOnly,
+                  onSelected: (v) {
+                    setState(() => _onlineOnly = v);
+                    _search();
+                  },
+                  selectedColor: AppColors.primary,
+                  labelStyle: TextStyle(
+                    color: _onlineOnly ? Colors.white : Colors.black,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Custom Sort Dropdown
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: DropdownButton<String>(
+                    value: _sortBy,
+                    isDense: true,
+                    underline: const SizedBox(),
+                    icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'distance',
+                        child: Text('Nearest'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'rating',
+                        child: Text('Top Rated'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() => _sortBy = v);
+                        _search();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ROW 2: Service Categories (Scrollable)
+          if (_serviceTypes.isNotEmpty)
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _serviceTypes.length + 1,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final isAll = i == 0;
+                  final id = isAll ? null : _serviceTypes[i - 1]['id'];
+                  final name = isAll
+                      ? 'All Services'
+                      : _serviceTypes[i - 1]['name'];
+                  final isSelected = _selectedServiceType == id;
+
+                  return ChoiceChip(
+                    label: Text(name),
+                    selected: isSelected,
+                    onSelected: (_) {
+                      setState(() => _selectedServiceType = id);
+                      _search();
+                    },
+                    labelStyle: TextStyle(
+                      fontSize: 11,
+                      color: isSelected ? Colors.white : Colors.black87,
+                    ),
+                    selectedColor: AppColors.primary,
+                    backgroundColor: Colors.white,
+                    side: BorderSide(
+                      color: isSelected
+                          ? AppColors.primary
+                          : Colors.grey.shade300,
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildListView() {
+    return RefreshIndicator(
+      onRefresh: _search,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _providers.length,
+        itemBuilder: (_, i) => _ProviderCard(
+          provider: _providers[i],
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => GarageProfileScreen(provider: _providers[i]),
+            ),
+          ),
         ),
-        Switch.adaptive(
-          value: onlyOnline,
-          activeColor: Colors.green,
-          onChanged: (val) {
-            setState(() => onlyOnline = val);
-            _fetchGarages();
-          },
+      ),
+    );
+  }
+
+  Widget _buildMapView() {
+    return FlutterMap(
+      options: MapOptions(initialCenter: _position, initialZoom: 13),
+      children: [
+        TileLayer(
+          urlTemplate: AppConfig.mapTileUrl,
+          userAgentPackageName: AppConfig.mapUserAgent,
+        ),
+        MarkerLayer(
+          markers: _providers.where((p) => p.latitude != null).map((p) {
+            return Marker(
+              point: LatLng(p.latitude!, p.longitude!),
+              width: 40,
+              height: 40,
+              child: const Icon(
+                Icons.location_on,
+                color: AppColors.primary,
+                size: 35,
+              ),
+            );
+          }).toList(),
         ),
       ],
     );
   }
+}
 
-  Widget _buildRadiusDropdown() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<double>(
-          value: selectedRadius,
-          items: const [
-            DropdownMenuItem(value: 10.0, child: Text("10 km")),
-            DropdownMenuItem(value: 15.0, child: Text("15 km")),
-            DropdownMenuItem(value: 20.0, child: Text("20 km")),
-            DropdownMenuItem(value: 500.0, child: Text("All Radius")),
-          ],
-          onChanged: (val) {
-            setState(() => selectedRadius = val!);
-            _fetchGarages();
-          },
-        ),
-      ),
-    );
-  }
+class _ProviderCard extends StatelessWidget {
+  final ProviderModel provider;
+  final VoidCallback onTap;
+  const _ProviderCard({required this.provider, required this.onTap});
 
-  Widget _serviceChip(Map<String, dynamic> service) {
-    bool isSelected = selectedServiceId == service['id'];
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(service['name']),
-        selected: isSelected,
-        onSelected: (val) {
-          setState(() => selectedServiceId = service['id']);
-          _fetchGarages();
-        },
-        selectedColor: AppColors.primaryBlue,
-        labelStyle: TextStyle(
-          color: isSelected ? Colors.white : Colors.black,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGarageCard(ProviderModel garage) {
+  @override
+  Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
       child: ListTile(
-        contentPadding: const EdgeInsets.all(16),
-        leading: CircleAvatar(
-          backgroundColor: AppColors.primaryBlue.withAlpha(20),
-          child: const Icon(Icons.build, color: AppColors.primaryBlue),
+        onTap: onTap,
+        contentPadding: const EdgeInsets.all(12),
+        leading: Container(
+          width: 50,
+          height: 50,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.store_outlined, color: AppColors.primary),
         ),
-        title: Row(
+        title: Text(
+          provider.businessName,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Text(
-                garage.businessName,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.star, color: AppColors.warning, size: 14),
+                const SizedBox(width: 4),
+                Text(
+                  provider.rating?.toStringAsFixed(1) ?? '0.0',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Icon(
+                  Icons.location_on_outlined,
+                  color: Colors.grey,
+                  size: 14,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  "${provider.distanceKm?.toStringAsFixed(1) ?? '?'} km",
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
             ),
-            if (garage.isVerified)
-              const Icon(Icons.verified, color: Colors.blue, size: 18),
           ],
         ),
-        subtitle: Text(
-          "${garage.rating} ⭐ • ${garage.distanceKm.toStringAsFixed(1)} km\nStatus: ${garage.isOnline ? 'Online' : 'Offline'}",
-        ),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => GarageProfileScreen(provider: garage),
-          ),
-        ),
+        trailing: StatusBadge.online(provider.isOnline),
       ),
     );
   }

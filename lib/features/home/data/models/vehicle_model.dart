@@ -1,41 +1,39 @@
 class VehicleModel {
   final int id;
-  final String make;
-  final String model;
+  final int? makeId;
+  final int? modelId;
+  final String? makeName;
+  final String? modelName;
   final String plateNumber;
-  final int year;
+  final int? year;
 
-  VehicleModel({
+  const VehicleModel({
     required this.id,
-    required this.make,
-    required this.model,
+    this.makeId,
+    this.modelId,
+    this.makeName,
+    this.modelName,
     required this.plateNumber,
-    required this.year,
+    this.year,
   });
 
   factory VehicleModel.fromJson(Map<String, dynamic> json) {
-    // 1. Extract Make Name (Handles the nested {id: 6, name: Honda})
-    String makeName = "Unknown";
-    if (json['make'] is Map) {
-      makeName = json['make']['name'] ?? "Unknown";
-    } else if (json['make'] is String) {
-      makeName = json['make'];
-    }
-
-    // 2. Extract Model Name (Handles the nested {id: 1, name: Corolla})
-    String modelName = "";
-    if (json['model'] is Map) {
-      modelName = json['model']['name'] ?? "";
-    } else if (json['model'] is String) {
-      modelName = json['model'];
-    }
-
     return VehicleModel(
       id: json['id'] ?? 0,
-      make: makeName,
-      model: modelName,
+      makeId: json['make_id'] ?? json['make']?['id'],
+      modelId: json['model_id'] ?? json['model']?['id'],
+      makeName: json['make']?['name'] ?? json['make_name'],
+      modelName: json['model']?['name'] ?? json['model_name'],
       plateNumber: json['plate_number'] ?? '',
-      year: json['year'] ?? 2020,
+      year: json['year'],
     );
+  }
+
+  String get displayName {
+    final parts = <String>[];
+    if (makeName != null) parts.add(makeName!);
+    if (modelName != null) parts.add(modelName!);
+    if (parts.isEmpty) return plateNumber;
+    return parts.join(' ');
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
-import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
+import 'package:road_hero/features/home/data/datasources/home_remote_source.dart';
 
 class VirtualMechanicScreen extends StatefulWidget {
   const VirtualMechanicScreen({super.key});
@@ -32,16 +32,16 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
     });
 
     try {
-      final result = await sl<HomeRemoteSource>().diagnoseIssue(text);
+      // The method name is 'diagnose' and it takes a named parameter 'symptoms'
+      final result = await sl<HomeRemoteSource>().diagnose(symptoms: text);
+
       setState(() {
         _messages.add({
           "role": "ai",
+          // The new API returns 'diagnosis'
           "text":
-              result['ai_response'] ??
-              "I'm not quite sure. Can you explain more?",
-          "action": result['requires_mechanic'] == true
-              ? result['recommended_service_type']
-              : null,
+              result['diagnosis'] ?? result['message'] ?? "I'm not quite sure.",
+          "action": result['suggested_providers'] != null ? "service" : null,
         });
         isTyping = false;
       });
@@ -49,8 +49,7 @@ class _VirtualMechanicScreenState extends State<VirtualMechanicScreen> {
       setState(() {
         _messages.add({
           "role": "ai",
-          "text":
-              "I'm having trouble connecting. Try again when your signal is stronger.",
+          "text": "I'm having trouble connecting. Try again later.",
         });
         isTyping = false;
       });

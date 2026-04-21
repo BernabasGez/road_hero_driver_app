@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:road_hero/core/di/injection_container.dart';
-import 'package:road_hero/core/theme/app_colors.dart';
-import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
+import 'package:road_hero/features/home/data/datasources/home_remote_source.dart';
 import 'package:road_hero/features/home/presentation/screens/request_history_detail_screen.dart';
 
 class ActivityScreen extends StatefulWidget {
@@ -22,12 +21,22 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _loadRequests() async {
-    final data = await sl<HomeRemoteSource>().getMyRequests();
-    if (mounted) {
-      setState(() {
-        requests = data;
-        isLoading = false;
-      });
+    try {
+      // The datasource uses getRequests() instead of getMyRequests()
+      final data = await sl<HomeRemoteSource>().getRequests();
+      if (mounted) {
+        setState(() {
+          requests = data;
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => isLoading = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Failed to load activity: $e")));
+      }
     }
   }
 

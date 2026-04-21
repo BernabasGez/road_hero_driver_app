@@ -1,182 +1,222 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:road_hero/core/theme/app_colors.dart';
-import 'package:road_hero/core/di/injection_container.dart';
-import 'package:road_hero/features/home/data/models/provider_model.dart';
-import 'package:road_hero/features/home/data/models/vehicle_model.dart';
-import 'package:road_hero/features/home/data/repositories/profile_remote_source.dart';
-import 'package:road_hero/features/home/presentation/screens/confirm_location_screen.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_dimensions.dart';
+import '../../../../core/widgets/app_button.dart';
+import '../../../../core/widgets/app_text_field.dart';
+import '../../data/models/provider_model.dart';
+import '../bloc/home_cubit.dart';
+import 'confirm_location_screen.dart';
 
 class RequestDetailsScreen extends StatefulWidget {
   final ProviderModel provider;
-  const RequestDetailsScreen({super.key, required this.provider});
+  final int? preSelectedServiceType;
+  const RequestDetailsScreen({super.key, required this.provider, this.preSelectedServiceType});
 
   @override
   State<RequestDetailsScreen> createState() => _RequestDetailsScreenState();
 }
 
 class _RequestDetailsScreenState extends State<RequestDetailsScreen> {
-  final TextEditingController _issueController = TextEditingController();
-  List<VehicleModel> vehicles = [];
-  int? selectedVehicleId;
-  File? _selectedImage;
-  bool isLoading = true;
+  final _descCtrl = TextEditingController();
+  File? _image;
+  int? _selectedVehicleId;
+  int? _selectedServiceTypeId;
+  final bool _isScheduled = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchMyVehicles();
-  }
-
-  Future<void> _fetchMyVehicles() async {
-    final list = await sl<ProfileRemoteSource>().getVehicles();
-    setState(() {
-      vehicles = list;
-      if (list.isNotEmpty) selectedVehicleId = list[0].id;
-      isLoading = false;
-    });
+    _selectedServiceTypeId = widget.preSelectedServiceType;
   }
 
   Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      setState(() => _selectedImage = File(pickedFile.path));
-    }
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (picked != null) setState(() => _image = File(picked.path));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text("Request Details"),
-        elevation: 0.5,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Select Vehicle",
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    value: selectedVehicleId,
-                    items: vehicles
-                        .map(
-                          (v) => DropdownMenuItem(
-                            value: v.id,
-                            child: Text("${v.make} (${v.plateNumber})"),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (val) => setState(() => selectedVehicleId = val),
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    "Describe Problem",
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _issueController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      hintText: "What is wrong?",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: const Text('Request Details')),
+      body: BlocBuilder<HomeCubit, HomeState>(
+        builder: (context, homeState) {
+          final vehicles = homeState.vehicles;
+          final serviceTypes = homeState.serviceTypes;
 
-                  // PHOTO SELECTOR (Figma 7.1)
-                  const Text(
-                    "Add Photo (Optional)",
-                    style: TextStyle(fontWeight: FontWeight.bold),
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(AppDimensions.screenPadding),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Provider info
+                Container(
+                  padding: const EdgeInsets.all(AppDimensions.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
                   ),
-                  const SizedBox(height: 8),
-                  GestureDetector(
-                    onTap: _pickImage,
-                    child: Container(
-                      height: 120,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.grey.shade300,
-                          style: BorderStyle.solid,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(Icons.store_outlined, color: AppColors.primary),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(widget.provider.businessName,
+                                style: AppTextStyles.bodyLarge.copyWith(fontWeight: FontWeight.w600)),
+                            if (widget.provider.distanceKm != null)
+                              Text('${widget.provider.distanceKm!.toStringAsFixed(1)} km away',
+                                  style: AppTextStyles.caption),
+                          ],
                         ),
                       ),
-                      child: _selectedImage == null
-                          ? const Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.add_a_photo_outlined,
-                                  color: Colors.grey,
-                                ),
-                                Text(
-                                  "Tap to add photo",
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                              ],
-                            )
-                          : Image.file(_selectedImage!, fit: BoxFit.cover),
-                    ),
+                    ],
                   ),
+                ),
+                const SizedBox(height: AppDimensions.lg),
 
-                  const SizedBox(height: 40),
-                  SizedBox(
+                // Vehicle selection
+                const Text('Select Vehicle', style: AppTextStyles.label),
+                const SizedBox(height: AppDimensions.sm),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.inputFill,
+                    borderRadius: BorderRadius.circular(AppDimensions.inputRadius),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: DropdownButton<int>(
+                    value: _selectedVehicleId,
+                    isExpanded: true,
+                    underline: const SizedBox(),
+                    hint: const Text('Choose vehicle', style: AppTextStyles.inputHint),
+                    items: vehicles.map((v) {
+                      return DropdownMenuItem(value: v.id, child: Text('${v.displayName} (${v.plateNumber})'));
+                    }).toList(),
+                    onChanged: (v) => setState(() => _selectedVehicleId = v),
+                  ),
+                ),
+                const SizedBox(height: AppDimensions.md),
+
+                // Service type
+                const Text('Service Type', style: AppTextStyles.label),
+                const SizedBox(height: AppDimensions.sm),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.inputFill,
+                    borderRadius: BorderRadius.circular(AppDimensions.inputRadius),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: DropdownButton<int>(
+                    value: _selectedServiceTypeId,
+                    isExpanded: true,
+                    underline: const SizedBox(),
+                    hint: const Text('Choose service', style: AppTextStyles.inputHint),
+                    items: serviceTypes.map((st) {
+                      return DropdownMenuItem(value: st['id'] as int, child: Text(st['name'] ?? ''));
+                    }).toList(),
+                    onChanged: (v) => setState(() => _selectedServiceTypeId = v),
+                  ),
+                ),
+                const SizedBox(height: AppDimensions.md),
+
+                // Description
+                AppTextField(
+                  controller: _descCtrl,
+                  label: 'Describe the issue',
+                  hint: 'e.g. Flat tire on Bole Road',
+                  maxLines: 4,
+                ),
+                const SizedBox(height: AppDimensions.md),
+
+                // Image
+                const Text('Photo (optional)', style: AppTextStyles.label),
+                const SizedBox(height: AppDimensions.sm),
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    height: 120,
                     width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        if (_issueController.text.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Please describe the problem"),
-                            ),
-                          );
-                          return;
-                        }
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ConfirmLocationScreen(
-                              provider: widget.provider,
-                              description: _issueController.text,
-                              vehicleId: selectedVehicleId!,
-                              imageFile: _selectedImage, // Pass the file
-                            ),
+                    decoration: BoxDecoration(
+                      color: AppColors.inputFill,
+                      borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                      border: Border.all(color: AppColors.border, style: BorderStyle.solid),
+                    ),
+                    child: _image != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                            child: Image.file(_image!, fit: BoxFit.cover),
+                          )
+                        : const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.camera_alt_outlined, color: AppColors.textHint, size: 32),
+                              SizedBox(height: 8),
+                              Text('Tap to add photo', style: AppTextStyles.caption),
+                            ],
                           ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.actionOrange,
-                      ),
-                      child: const Text(
-                        "Next: Location",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: AppDimensions.lg),
+
+                // CTA
+                AppButton(
+                  label: 'Confirm Location',
+                  icon: Icons.location_on_outlined,
+                  onPressed: () {
+                    if (_selectedVehicleId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please select a vehicle')),
+                      );
+                      return;
+                    }
+                    if (_selectedServiceTypeId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please select a service type')),
+                      );
+                      return;
+                    }
+                    if (_descCtrl.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please describe the issue')),
+                      );
+                      return;
+                    }
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ConfirmLocationScreen(
+                          provider: widget.provider,
+                          description: _descCtrl.text.trim(),
+                          vehicleId: _selectedVehicleId!,
+                          serviceTypeId: _selectedServiceTypeId!,
+                          imageFile: _image,
                         ),
                       ),
-                    ),
-                  ),
-                ],
-              ),
+                    );
+                  },
+                ),
+                const SizedBox(height: AppDimensions.xl),
+              ],
             ),
+          );
+        },
+      ),
     );
   }
 }

@@ -2,28 +2,35 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:dio/io.dart';
+import '../config/app_config.dart';
+import 'auth_interceptor.dart';
 
 class DioClient {
-  final Dio dio;
+  late final Dio dio;
 
-  DioClient()
-    : dio = Dio(
-        BaseOptions(
-          baseUrl: 'https://34.254.56.65/api/v1/driver/',
-          connectTimeout: const Duration(seconds: 45),
-          receiveTimeout: const Duration(seconds: 45),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
-      ) {
+  DioClient() {
+    dio = Dio(
+      BaseOptions(
+        baseUrl: AppConfig.baseUrl,
+        connectTimeout: AppConfig.connectTimeout,
+        receiveTimeout: AppConfig.receiveTimeout,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    dio.interceptors.add(AuthInterceptor(dio));
+
+    // THIS IS THE CRITICAL PART:
     if (!kIsWeb) {
-      // Using the modern IOHttpClientAdapter format to fix deprecation
       dio.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () {
           final client = HttpClient();
-          client.badCertificateCallback = (cert, host, port) => true;
+          // This tells Android to ignore the "Not Secure" warning on YOUR IP
+          client.badCertificateCallback =
+              (X509Certificate cert, String host, int port) => true;
           return client;
         },
       );

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
-import 'package:road_hero/features/home/data/repositories/profile_remote_source.dart';
+import 'package:road_hero/features/home/data/datasources/home_remote_source.dart';
 
 class AddVehicleScreen extends StatefulWidget {
   const AddVehicleScreen({super.key});
@@ -27,7 +27,8 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
 
   Future<void> _loadMakes() async {
     try {
-      final data = await sl<ProfileRemoteSource>().getVehicleMakes();
+      // Use HomeRemoteSource instead of ProfileRemoteSource
+      final data = await sl<HomeRemoteSource>().getVehicleMakes();
       setState(() {
         makes = data;
         isLoading = false;
@@ -47,12 +48,14 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
 
     setState(() => isSubmitting = true);
     try {
-      await sl<ProfileRemoteSource>().addVehicle(
-        makeId: selectedMakeId!,
-        plate: _plateController.text.trim(),
-        year: int.parse(_yearController.text),
-      );
-      if (mounted) Navigator.pop(context, true); // Return true to refresh list
+      // Use HomeRemoteSource. The method expects a Map.
+      await sl<HomeRemoteSource>().addVehicle({
+        "make_id": selectedMakeId,
+        "plate_number": _plateController.text.trim(),
+        "year": int.tryParse(_yearController.text) ?? 2020,
+      });
+
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

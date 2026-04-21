@@ -17,6 +17,10 @@ class RegisterUseCase {
   RegisterUseCase(this.repository);
 
   Future<void> call(RegisterParams params) {
-    return repository.register(params);
+    return repository.register(
+      phone: params.phoneNumber,
+      name: params.fullName,
+      password: params.password,
+    );
   }
 }

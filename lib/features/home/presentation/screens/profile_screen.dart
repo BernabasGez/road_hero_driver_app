@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:road_hero/core/di/injection_container.dart';
 import 'package:road_hero/core/theme/app_colors.dart';
 import 'package:road_hero/core/utils/local_storage.dart';
-import 'package:road_hero/features/home/data/repositories/profile_remote_source.dart';
-import 'package:road_hero/features/home/data/repositories/home_remote_source.dart';
+import 'package:road_hero/features/home/data/datasources/home_remote_source.dart';
 import 'package:road_hero/features/auth/data/models/user_model.dart';
 import 'package:road_hero/features/home/data/models/vehicle_model.dart';
 import 'package:road_hero/features/auth/presentation/screens/auth_entry_screen.dart';
@@ -28,14 +27,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadAll() async {
     try {
+      // Both user profile and vehicles are now in HomeRemoteSource
       final userData = await sl<HomeRemoteSource>().getProfile();
-      final vehicleData = await sl<ProfileRemoteSource>().getVehicles();
-      if (mounted)
+      final vehicleData = await sl<HomeRemoteSource>().getVehicles();
+      if (mounted) {
         setState(() {
           user = userData;
           vehicles = vehicleData;
           isLoading = false;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => isLoading = false);
     }
@@ -54,8 +55,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading)
+    if (isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -87,7 +89,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _buildSection("Vehicles", Icons.directions_car),
             ...vehicles.map(
               (v) => ListTile(
-                title: Text("${v.make} ${v.model}"),
+                title: Text(
+                  v.displayName,
+                ), // Use displayName instead of make/model
                 subtitle: Text(v.plateNumber),
               ),
             ),
