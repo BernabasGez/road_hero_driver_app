@@ -40,6 +40,7 @@ class _ActivityTabState extends State<ActivityTab>
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -49,16 +50,20 @@ class _ActivityTabState extends State<ActivityTab>
         sl<HomeRemoteSource>().getRequests(statusGroup: 'active'),
         sl<HomeRemoteSource>().getRequests(statusGroup: 'history'),
       ]);
-      setState(() {
-        _active = results[0];
-        _history = results[1];
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _active = results[0];
+          _history = results[1];
+          _loading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -66,7 +71,7 @@ class _ActivityTabState extends State<ActivityTab>
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Header
+        // --- Tab Header ---
         Container(
           padding: EdgeInsets.fromLTRB(
             AppDimensions.screenPadding,
@@ -86,6 +91,10 @@ class _ActivityTabState extends State<ActivityTab>
                 unselectedLabelColor: AppColors.textSecondary,
                 indicatorColor: AppColors.primary,
                 indicatorWeight: 3,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
                 tabs: [
                   Tab(text: 'Active (${_active.length})'),
                   Tab(text: 'History (${_history.length})'),
@@ -94,6 +103,8 @@ class _ActivityTabState extends State<ActivityTab>
             ],
           ),
         ),
+
+        // --- List Content ---
         Expanded(
           child: _loading
               ? const SkeletonList()
@@ -120,8 +131,8 @@ class _ActivityTabState extends State<ActivityTab>
         title: isHistory ? 'No past requests' : 'No active requests',
         subtitle: isHistory
             ? 'Your service history will appear here'
-            : 'Request assistance to see it here',
-        icon: isHistory ? Icons.history : Icons.hourglass_empty,
+            : 'Request assistance to see your live status here',
+        icon: isHistory ? Icons.history : Icons.hourglass_empty_outlined,
       );
     }
 
@@ -132,26 +143,29 @@ class _ActivityTabState extends State<ActivityTab>
         itemCount: items.length,
         itemBuilder: (_, i) {
           final r = items[i];
+
           return GestureDetector(
+            // --- THE ONTAP LOGIC YOU WERE LOOKING FOR ---
             onTap: () {
-              // --- SMART NAVIGATION LOGIC ---
               if (r.isActive) {
-                // If the request is currently in progress, go to Live Tracking
+                // ACTIVE: Go to Live Status (No map)
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => TrackingScreen(
-                      requestId: r.id,
+                      requestId: r.id, // mapped from request_id
                       garageName: r.providerName ?? 'Garage',
                     ),
                   ),
                 );
               } else {
-                // If the request is done/cancelled, go to the History Detail page
+                // COMPLETED/CANCELLED: Go to Receipt/Review page
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => RequestHistoryDetailScreen(requestId: r.id),
+                    builder: (_) => RequestHistoryDetailScreen(
+                      requestId: r.id, // mapped from request_id
+                    ),
                   ),
                 );
               }
@@ -172,6 +186,7 @@ class _ActivityTabState extends State<ActivityTab>
               ),
               child: Row(
                 children: [
+                  // Icon
                   Container(
                     width: 48,
                     height: 48,
@@ -182,10 +197,11 @@ class _ActivityTabState extends State<ActivityTab>
                     child: const Icon(
                       Icons.build_outlined,
                       color: AppColors.primary,
-                      size: 24,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // Details
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -193,22 +209,23 @@ class _ActivityTabState extends State<ActivityTab>
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              r.providerName ??
-                                  'Garage', // Uses the fixed model field
-                              style: AppTextStyles.bodyMedium.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textPrimary,
+                            Flexible(
+                              child: Text(
+                                r.providerName ?? 'Garage',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                             StatusBadge.fromRequestStatus(r.status),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          r.serviceType ?? r.description ?? 'General Service',
+                          r.serviceType ?? 'Automotive Service',
                           style: AppTextStyles.bodySmall,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

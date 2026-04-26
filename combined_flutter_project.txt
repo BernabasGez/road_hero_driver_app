@@ -737,7 +737,7 @@ class DioClient {
 class AppConfig {
   AppConfig._();
 
-  static const String baseUrl = 'https://34.254.56.65/api/v1/driver/';
+  static const String baseUrl = 'https://roadhero.online/api/v1/driver/';
   static const Duration connectTimeout = Duration(seconds: 30);
   static const Duration receiveTimeout = Duration(seconds: 30);
   static const Duration trackingPollInterval = Duration(seconds: 8);
@@ -1338,6 +1338,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_dimensions.dart';
 
 enum AppButtonVariant { primary, secondary, text }
+
 enum AppButtonSize { large, medium, small }
 
 class AppButton extends StatelessWidget {
@@ -1387,17 +1388,26 @@ class AppButton extends StatelessWidget {
           )
         : Row(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center, // Center the content
             children: [
               if (icon != null) ...[
                 Icon(icon, size: fontSize + 4),
                 const SizedBox(width: 8),
               ],
-              Text(label,
+              // Wrap text in Flexible to prevent "RenderFlex overflow"
+              Flexible(
+                child: Text(
+                  label,
+                  overflow:
+                      TextOverflow.ellipsis, // Add dots if text is too long
+                  maxLines: 1,
                   style: TextStyle(
                     fontSize: fontSize,
                     fontWeight: FontWeight.w500,
                     fontFamily: 'Lexend',
-                  )),
+                  ),
+                ),
+              ),
             ],
           );
 
@@ -1406,39 +1416,39 @@ class AppButton extends StatelessWidget {
       height: height,
       child: switch (variant) {
         AppButtonVariant.primary => ElevatedButton(
-            onPressed: isLoading ? null : onPressed,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: AppColors.disabled,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
-              ),
-              elevation: 0,
+          onPressed: isLoading ? null : onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.accent,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: AppColors.disabled,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
             ),
-            child: child,
+            elevation: 0,
           ),
+          child: child,
+        ),
         AppButtonVariant.secondary => OutlinedButton(
-            onPressed: isLoading ? null : onPressed,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              side: const BorderSide(color: AppColors.primary, width: 1.5),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
-              ),
+          onPressed: isLoading ? null : onPressed,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.primary,
+            side: const BorderSide(color: AppColors.primary, width: 1.5),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
             ),
-            child: child,
           ),
+          child: child,
+        ),
         AppButtonVariant.text => TextButton(
-            onPressed: isLoading ? null : onPressed,
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
-              ),
+          onPressed: isLoading ? null : onPressed,
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.primary,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppDimensions.buttonRadius),
             ),
-            child: child,
           ),
+          child: child,
+        ),
       },
     );
   }
@@ -1472,11 +1482,7 @@ class AppIconButton extends StatelessWidget {
           color: backgroundColor ?? AppColors.border,
           shape: BoxShape.circle,
         ),
-        child: Icon(
-          icon,
-          color: iconColor ?? AppColors.primary,
-          size: 20,
-        ),
+        child: Icon(icon, color: iconColor ?? AppColors.primary, size: 20),
       ),
     );
   }
@@ -4020,23 +4026,26 @@ class HomeRemoteSource {
     }
   }
 
-  Future<void> submitReview(
-    int requestId, {
+  Future<void> submitReview({
+    required int requestId,
     required int rating,
+    required List<String> tags,
     String? comment,
-    List<String>? tags,
   }) async {
     try {
+      // Removed the / at the end of reviews to fix the 404 error
       await dio.post(
         'requests/$requestId/reviews',
-        data: {
-          'rating': rating,
-          if (comment != null && comment.isNotEmpty) 'comment': comment,
-          if (tags != null && tags.isNotEmpty) 'tags': tags,
-        },
+        data: {'rating': rating, 'tags': tags, 'comment': comment ?? ""},
       );
     } on DioException catch (e) {
-      throw _err(e);
+      // Log details if it fails so we can see the server response
+      print("SERVER ERROR: ${e.response?.data}");
+      String msg = "Failed to submit review";
+      if (e.response?.data is Map) {
+        msg = e.response?.data['message'] ?? msg;
+      }
+      throw Exception(msg);
     }
   }
 
@@ -4204,6 +4213,53 @@ class HomeRemoteSource {
     AppLogger.error('API Error', e);
     return ServerException(msg, statusCode: e.response?.statusCode);
   }
+
+  Future<List<Map<String, dynamic>>> getProviderReviews(int providerId) async {
+    try {
+      final r = await dio.get('providers/$providerId/reviews');
+      final dynamic responseBody = r.data;
+      List<dynamic> items = [];
+
+      if (responseBody['data'] != null) {
+        items = responseBody['data'] is List
+            ? responseBody['data']
+            : responseBody['data']['results'] ?? [];
+      }
+      return items.cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _err(e);
+    }
+  }
+
+  Future<void> submitGarageReview({
+    required int providerId,
+    required int rating,
+    String? comment,
+  }) async {
+    try {
+      final response = await dio.post(
+        'providers/$providerId/reviews/',
+        data: {'rating': rating, 'comment': comment ?? ""},
+      );
+      // Verbose logging for debugging
+      print("✅ REVIEW SUCCESS: ${response.data}");
+    } on DioException catch (e) {
+      // 🚨 THIS PRINTS THE EXACT BACKEND ERROR TO YOUR TERMINAL
+      print("❌ SERVER ERROR DATA: ${e.response?.data}");
+      print("❌ STATUS CODE: ${e.response?.statusCode}");
+
+      String errorMsg = "Submission failed";
+      if (e.response?.data is Map) {
+        // Many backends put errors in 'detail' or 'error' keys
+        errorMsg =
+            e.response?.data['message'] ??
+            e.response?.data['detail'] ??
+            e.response?.data['error'] ??
+            errorMsg;
+      }
+      throw Exception(errorMsg);
+    }
+  }
 }
 
 
@@ -4325,7 +4381,6 @@ class ServiceRequestModel {
   });
 
   factory ServiceRequestModel.fromJson(Map<String, dynamic> json) {
-    // Extract nested objects if they exist
     final provider = json['provider'] as Map<String, dynamic>?;
     final vehicle = json['vehicle'] as Map<String, dynamic>?;
     final location = json['location'] as Map<String, dynamic>?;
@@ -4346,23 +4401,19 @@ class ServiceRequestModel {
       // The backend uses 'id' for details and 'request_id' for creation success
       id: json['id'] ?? json['request_id'] ?? 0,
 
-      // Provider Info (Handling nested object from detail view)
+      // --- FIXED PROVIDER NAME LOGIC BASED ON YOUR DOCS ---
       providerId: provider != null ? provider['id'] : json['provider_id'],
       providerName: provider != null
-          ? (provider['business_name'] ?? provider['name'])
-          : json['provider_name'],
-      providerPhone: provider != null
-          ? provider['phone']
-          : json['provider_phone'],
+          ? provider['business_name'] // Key from GET /requests/{id}
+          : (json['provider_name'] ??
+                json['business_name'] ??
+                'Garage'), // Key from GET /requests/
 
-      // Vehicle Info
       vehicleId: json['vehicle_id'],
       vehicleName: vName ?? json['vehicle_name'],
-
       description: json['description'] ?? json['issue_description'],
       status: json['status'] ?? 'PENDING',
 
-      // Service Type can be a String or a Map with a 'name'
       serviceType: json['service_type'] is Map
           ? json['service_type']['name']
           : (json['service_type'] ?? json['service_type_name']),
@@ -4371,7 +4422,6 @@ class ServiceRequestModel {
       scheduledTime: json['scheduled_time'],
       imageUrl: json['photo'] ?? json['image_url'],
 
-      // Location Info (Checks nested object first)
       lat: _d(location != null ? location['lat'] : json['lat']),
       lng: _d(location != null ? location['lng'] : json['lng']),
       address: location != null
@@ -4380,7 +4430,6 @@ class ServiceRequestModel {
 
       createdAt: json['created_at'],
 
-      // Tracking Data (Matches the /tracking endpoint)
       providerLat: _d(json['provider_lat']),
       providerLng: _d(json['provider_lng']),
       eta: json['eta_minutes'] != null
@@ -4390,12 +4439,7 @@ class ServiceRequestModel {
   }
 
   // Logic helpers for the UI
-  bool get canCancel => [
-    'PENDING',
-    'ACCEPTED',
-    'EN_ROUTE',
-    'ON_THE_WAY',
-  ].contains(status.toUpperCase());
+  bool get canCancel => status.toUpperCase() == 'PENDING';
 
   bool get isActive => [
     'PENDING',
@@ -4621,8 +4665,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 final req = requests[index];
                 // Using business_name for the Garage
                 final garage =
+                    req['provider_name'] ?? // Key from your docs
                     req['provider']?['business_name'] ??
-                    req['provider']?['name'] ??
+                    req['business_name'] ??
                     "Garage";
                 final status = req['status'] ?? "PENDING";
                 final id = req['request_id'] ?? req['id'];
@@ -4683,7 +4728,8 @@ class ActivityTab extends StatefulWidget {
   State<ActivityTab> createState() => _ActivityTabState();
 }
 
-class _ActivityTabState extends State<ActivityTab> with SingleTickerProviderStateMixin {
+class _ActivityTabState extends State<ActivityTab>
+    with SingleTickerProviderStateMixin {
   late TabController _tabCtrl;
   List<ServiceRequestModel> _active = [];
   List<ServiceRequestModel> _history = [];
@@ -4749,8 +4795,7 @@ class _ActivityTabState extends State<ActivityTab> with SingleTickerProviderStat
                 labelColor: AppColors.primary,
                 unselectedLabelColor: AppColors.textSecondary,
                 indicatorColor: AppColors.primary,
-                indicatorWeight: 2.5,
-                labelStyle: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                indicatorWeight: 3,
                 tabs: [
                   Tab(text: 'Active (${_active.length})'),
                   Tab(text: 'History (${_history.length})'),
@@ -4763,25 +4808,30 @@ class _ActivityTabState extends State<ActivityTab> with SingleTickerProviderStat
           child: _loading
               ? const SkeletonList()
               : _error != null
-                  ? ErrorView(message: _error!, onRetry: _load)
-                  : TabBarView(
-                      controller: _tabCtrl,
-                      children: [
-                        _buildList(_active, isActive: true),
-                        _buildList(_history, isActive: false),
-                      ],
-                    ),
+              ? ErrorView(message: _error!, onRetry: _load)
+              : TabBarView(
+                  controller: _tabCtrl,
+                  children: [
+                    _buildList(_active, isHistory: false),
+                    _buildList(_history, isHistory: true),
+                  ],
+                ),
         ),
       ],
     );
   }
 
-  Widget _buildList(List<ServiceRequestModel> items, {required bool isActive}) {
+  Widget _buildList(
+    List<ServiceRequestModel> items, {
+    required bool isHistory,
+  }) {
     if (items.isEmpty) {
       return EmptyView(
-        title: isActive ? 'No active requests' : 'No past requests',
-        subtitle: isActive ? 'Your active service requests will appear here' : null,
-        icon: isActive ? Icons.hourglass_empty_outlined : Icons.history_outlined,
+        title: isHistory ? 'No past requests' : 'No active requests',
+        subtitle: isHistory
+            ? 'Your service history will appear here'
+            : 'Request assistance to see it here',
+        icon: isHistory ? Icons.history : Icons.hourglass_empty,
       );
     }
 
@@ -4794,17 +4844,26 @@ class _ActivityTabState extends State<ActivityTab> with SingleTickerProviderStat
           final r = items[i];
           return GestureDetector(
             onTap: () {
-              if (isActive) {
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => TrackingScreen(
-                    requestId: r.id,
-                    garageName: r.providerName ?? 'Garage',
+              // --- SMART NAVIGATION LOGIC ---
+              if (r.isActive) {
+                // If the request is currently in progress, go to Live Tracking
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TrackingScreen(
+                      requestId: r.id,
+                      garageName: r.providerName ?? 'Garage',
+                    ),
                   ),
-                ));
+                );
               } else {
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => RequestHistoryDetailScreen(requestId: r.id),
-                ));
+                // If the request is done/cancelled, go to the History Detail page
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => RequestHistoryDetailScreen(requestId: r.id),
+                  ),
+                );
               }
             },
             child: Container(
@@ -4814,19 +4873,27 @@ class _ActivityTabState extends State<ActivityTab> with SingleTickerProviderStat
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
                 boxShadow: const [
-                  BoxShadow(color: AppColors.cardShadow, blurRadius: 8, offset: Offset(0, 2)),
+                  BoxShadow(
+                    color: AppColors.cardShadow,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
                 ],
               ),
               child: Row(
                 children: [
                   Container(
-                    width: 44,
-                    height: 44,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.08),
+                      color: AppColors.primary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.build_outlined, color: AppColors.primary, size: 22),
+                    child: const Icon(
+                      Icons.build_outlined,
+                      color: AppColors.primary,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -4834,30 +4901,41 @@ class _ActivityTabState extends State<ActivityTab> with SingleTickerProviderStat
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Expanded(
-                              child: Text(
-                                r.providerName ?? 'Service #${r.id}',
-                                style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w600),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                            Text(
+                              r.providerName ??
+                                  'Garage', // This now correctly pulls "Haile Auto" instead of personal name
+                              style: AppTextStyles.bodyMedium.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                             StatusBadge.fromRequestStatus(r.status),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          r.serviceType ?? r.description ?? '',
-                          style: AppTextStyles.caption,
+                          r.serviceType ?? r.description ?? 'General Service',
+                          style: AppTextStyles.bodySmall,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          r.createdAt?.substring(0, 10) ?? '',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Icon(Icons.chevron_right, color: AppColors.textHint, size: 20),
+                  const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
                 ],
               ),
             ),
@@ -5700,14 +5778,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _loading = true;
   String? _error;
 
-  // Filters
+  // Filter States
   bool _onlineOnly = false;
-  final double _radius = AppConfig.defaultSearchRadius;
   int? _selectedServiceType;
   String _sortBy = 'distance';
-  double? _minRating;
-  LatLng _position = const LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
 
+  LatLng _position = const LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
   List<Map<String, dynamic>> _serviceTypes = [];
   bool _showMap = false;
 
@@ -5720,9 +5796,22 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   Future<void> _init() async {
     try {
-      final pos = await Geolocator.getCurrentPosition();
+      // 1. Instant check for last location
+      Position? lastPos = await Geolocator.getLastKnownPosition();
+      if (lastPos != null) {
+        _position = LatLng(lastPos.latitude, lastPos.longitude);
+      }
+
+      // 2. Refresh location with a strict 4-second timeout to avoid infinite loading
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.low,
+        timeLimit: const Duration(seconds: 4),
+      );
       _position = LatLng(pos.latitude, pos.longitude);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("Location fallback used: $e");
+    }
+
     _loadServiceTypes();
     _search();
   }
@@ -5730,34 +5819,42 @@ class _ExploreScreenState extends State<ExploreScreen> {
   Future<void> _loadServiceTypes() async {
     try {
       final types = await sl<HomeRemoteSource>().getServiceTypes();
-      setState(() => _serviceTypes = types);
+      if (mounted) setState(() => _serviceTypes = types);
     } catch (_) {}
   }
 
   Future<void> _search() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
+
     try {
-      final providers = await sl<HomeRemoteSource>().getNearbyProviders(
-        lat: _position.latitude,
-        lng: _position.longitude,
-        radiusKm: _radius,
-        isOnline: _onlineOnly ? true : null,
-        serviceTypeId: _selectedServiceType,
-        minRating: _minRating,
-        sortBy: _sortBy,
-      );
-      setState(() {
-        _providers = providers;
-        _loading = false;
-      });
+      final providers = await sl<HomeRemoteSource>()
+          .getNearbyProviders(
+            lat: _position.latitude,
+            lng: _position.longitude,
+            radiusKm: 500.0,
+            isOnline: _onlineOnly ? true : null,
+            serviceTypeId: _selectedServiceType,
+            sortBy: _sortBy,
+          )
+          .timeout(const Duration(seconds: 10)); // Prevent API hang
+
+      if (mounted) {
+        setState(() {
+          _providers = providers;
+          _loading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = "Connection timeout. Tap to retry.";
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -5776,130 +5873,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
       ),
       body: Column(
         children: [
-          // ─── Filters ───────────────────────────────
-          // ─── Filters ───────────────────────────────
-          Container(
-            color: AppColors.surface,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              children: [
-                // 1. TOP ROW: Online, Rating, and Sort (Now Scrollable to fix Overflow)
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      FilterChip(
-                        label: Text(
-                          'Online',
-                          style: TextStyle(
-                            color: _onlineOnly ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                        selected: _onlineOnly,
-                        onSelected: (v) {
-                          setState(() => _onlineOnly = v);
-                          _search();
-                        },
-                        selectedColor: AppColors.primary,
-                        backgroundColor: Colors.grey[200], // Visible light grey
-                      ),
-                      const SizedBox(width: 8),
-                      FilterChip(
-                        label: Text(
-                          'Rating ${_minRating?.toStringAsFixed(0) ?? "Any"}',
-                          style: TextStyle(
-                            color: _minRating != null
-                                ? Colors.white
-                                : Colors.black87,
-                          ),
-                        ),
-                        selected: _minRating != null,
-                        onSelected: (_) {
-                          setState(
-                            () => _minRating = _minRating == null ? 4.0 : null,
-                          );
-                          _search();
-                        },
-                        selectedColor: AppColors.primary,
-                        backgroundColor: Colors.grey[200],
-                      ),
-                      const SizedBox(width: 12),
-                      // Sort Dropdown
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: DropdownButton<String>(
-                          value: _sortBy,
-                          underline: const SizedBox(),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'distance',
-                              child: Text('Nearest'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'rating',
-                              child: Text('Top Rated'),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(() => _sortBy = v);
-                              _search();
-                            }
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // 2. BOTTOM ROW: Service Types (Repair, Towing, etc.)
-                if (_serviceTypes.isNotEmpty)
-                  SizedBox(
-                    height: 40,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: _serviceTypes.length + 1,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
-                      itemBuilder: (_, i) {
-                        final isAll = i == 0;
-                        final id = isAll ? null : _serviceTypes[i - 1]['id'];
-                        final isSelected = _selectedServiceType == id;
-
-                        return ChoiceChip(
-                          label: Text(
-                            isAll ? 'All' : _serviceTypes[i - 1]['name'] ?? '',
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                          selected: isSelected,
-                          onSelected: (_) {
-                            setState(() => _selectedServiceType = id);
-                            _search();
-                          },
-                          selectedColor: AppColors.primary,
-                          backgroundColor: Colors.grey[200],
-                          side: BorderSide(
-                            color: isSelected
-                                ? AppColors.primary
-                                : Colors.transparent,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          // ─── Content ───────────────────────────────
+          _buildFilters(),
           Expanded(
             child: _loading
                 ? const SkeletonList()
@@ -5908,7 +5882,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 : _providers.isEmpty
                 ? const EmptyView(
                     title: 'No garages found',
-                    subtitle: 'Try adjusting your filters or search area',
+                    subtitle: 'Try changing your filters',
                     icon: Icons.search_off_outlined,
                   )
                 : _showMap
@@ -5920,16 +5894,134 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
+  // --- REFINED CLEAN FILTERS ---
+  Widget _buildFilters() {
+    return Container(
+      color: AppColors.surface,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        children: [
+          // ROW 1: Toggles and Sorting
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Online Now'),
+                  selected: _onlineOnly,
+                  onSelected: (v) {
+                    setState(() => _onlineOnly = v);
+                    _search();
+                  },
+                  selectedColor: AppColors.primary,
+                  labelStyle: TextStyle(
+                    color: _onlineOnly ? Colors.white : Colors.black,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Custom Sort Dropdown
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: DropdownButton<String>(
+                    value: _sortBy,
+                    isDense: true,
+                    underline: const SizedBox(),
+                    icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'distance',
+                        child: Text('Nearest'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'rating',
+                        child: Text('Top Rated'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() => _sortBy = v);
+                        _search();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ROW 2: Service Categories (Scrollable)
+          if (_serviceTypes.isNotEmpty)
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _serviceTypes.length + 1,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final isAll = i == 0;
+                  final id = isAll ? null : _serviceTypes[i - 1]['id'];
+                  final name = isAll
+                      ? 'All Services'
+                      : _serviceTypes[i - 1]['name'];
+                  final isSelected = _selectedServiceType == id;
+
+                  return ChoiceChip(
+                    label: Text(name),
+                    selected: isSelected,
+                    onSelected: (_) {
+                      setState(() => _selectedServiceType = id);
+                      _search();
+                    },
+                    labelStyle: TextStyle(
+                      fontSize: 11,
+                      color: isSelected ? Colors.white : Colors.black87,
+                    ),
+                    selectedColor: AppColors.primary,
+                    backgroundColor: Colors.white,
+                    side: BorderSide(
+                      color: isSelected
+                          ? AppColors.primary
+                          : Colors.grey.shade300,
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildListView() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(AppDimensions.screenPadding),
-      itemCount: _providers.length,
-      itemBuilder: (_, i) => _ProviderCard(
-        provider: _providers[i],
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => GarageProfileScreen(provider: _providers[i]),
+    return RefreshIndicator(
+      onRefresh: _search,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _providers.length,
+        itemBuilder: (_, i) => _ProviderCard(
+          provider: _providers[i],
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => GarageProfileScreen(provider: _providers[i]),
+            ),
           ),
         ),
       ),
@@ -5945,43 +6037,18 @@ class _ExploreScreenState extends State<ExploreScreen> {
           userAgentPackageName: AppConfig.mapUserAgent,
         ),
         MarkerLayer(
-          markers: _providers
-              .where((p) => p.latitude != null && p.longitude != null)
-              .map((p) {
-                return Marker(
-                  point: LatLng(p.latitude!, p.longitude!),
-                  width: 40,
-                  height: 48,
-                  child: GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => GarageProfileScreen(provider: p),
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: p.isOnline
-                                ? AppColors.pinDefault
-                                : AppColors.disabled,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                          child: const Icon(
-                            Icons.build_outlined,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              })
-              .toList(),
+          markers: _providers.where((p) => p.latitude != null).map((p) {
+            return Marker(
+              point: LatLng(p.latitude!, p.longitude!),
+              width: 40,
+              height: 40,
+              child: const Icon(
+                Icons.location_on,
+                color: AppColors.primary,
+                size: 35,
+              ),
+            );
+          }).toList(),
         ),
       ],
     );
@@ -5991,112 +6058,64 @@ class _ExploreScreenState extends State<ExploreScreen> {
 class _ProviderCard extends StatelessWidget {
   final ProviderModel provider;
   final VoidCallback onTap;
-
   const _ProviderCard({required this.provider, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: AppDimensions.cardSpacing),
-        padding: const EdgeInsets.all(AppDimensions.cardPadding),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
-          boxShadow: const [
-            BoxShadow(
-              color: AppColors.cardShadow,
-              blurRadius: 8,
-              offset: Offset(0, 2),
-            ),
-          ],
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        contentPadding: const EdgeInsets.all(12),
+        leading: Container(
+          width: 50,
+          height: 50,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.store_outlined, color: AppColors.primary),
         ),
-        child: Row(
+        title: Text(
+          provider.businessName,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Avatar
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.store_outlined,
-                color: AppColors.primary,
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 14),
-            // Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          provider.businessName,
-                          style: AppTextStyles.bodyLarge.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      StatusBadge.online(provider.isOnline),
-                    ],
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.star, color: AppColors.warning, size: 14),
+                const SizedBox(width: 4),
+                Text(
+                  provider.rating?.toStringAsFixed(1) ?? '0.0',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      if (provider.rating != null) ...[
-                        const Icon(
-                          Icons.star,
-                          size: 15,
-                          color: AppColors.warning,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          provider.rating!.toStringAsFixed(1),
-                          style: AppTextStyles.caption.copyWith(
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        if (provider.reviewCount != null)
-                          Text(
-                            ' (${provider.reviewCount})',
-                            style: AppTextStyles.caption,
-                          ),
-                        const SizedBox(width: 12),
-                      ],
-                      if (provider.distanceKm != null) ...[
-                        const Icon(
-                          Icons.location_on_outlined,
-                          size: 14,
-                          color: AppColors.textHint,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          '${provider.distanceKm!.toStringAsFixed(1)} km',
-                          style: AppTextStyles.caption,
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.chevron_right,
-              color: AppColors.textHint,
-              size: 20,
+                ),
+                const SizedBox(width: 12),
+                const Icon(
+                  Icons.location_on_outlined,
+                  color: Colors.grey,
+                  size: 14,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  "${provider.distanceKm?.toStringAsFixed(1) ?? '?'} km",
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
             ),
           ],
         ),
+        trailing: StatusBadge.online(provider.isOnline),
       ),
     );
   }
@@ -6108,16 +6127,17 @@ class _ProviderCard extends StatelessWidget {
 ════════════════════════════════════════════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart'; // Add this for date formatting
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_dimensions.dart';
 import '../../../../core/widgets/app_button.dart';
-import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/error_view.dart';
 import '../../data/datasources/home_remote_source.dart';
 import '../../data/models/provider_model.dart';
 import 'request_details_screen.dart';
+
 class GarageProfileScreen extends StatefulWidget {
   final ProviderModel provider;
   const GarageProfileScreen({super.key, required this.provider});
@@ -6126,29 +6146,96 @@ class GarageProfileScreen extends StatefulWidget {
   State<GarageProfileScreen> createState() => _GarageProfileScreenState();
 }
 
-class _GarageProfileScreenState extends State<GarageProfileScreen> {
+class _GarageProfileScreenState extends State<GarageProfileScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   ProviderModel? _detail;
-  bool _loading = true;
+  bool _loadingDetail = true;
+
+  // Data for dynamic tabs
+  List<Map<String, dynamic>> _spareParts = [];
+  bool _loadingParts = false;
+
+  List<Map<String, dynamic>> _reviews = [];
+  bool _loadingReviews = false;
+
   bool _isFavorite = false;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(_handleTabChange);
     _loadDetail();
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_handleTabChange);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  // TRIGGER BACKEND CALLS WHEN TABS ARE CLICKED
+  void _handleTabChange() {
+    if (_tabController.indexIsChanging) return;
+
+    if (_tabController.index == 1 && _spareParts.isEmpty) {
+      _loadSpareParts();
+    } else if (_tabController.index == 2 && _reviews.isEmpty) {
+      _loadReviews();
+    }
   }
 
   Future<void> _loadDetail() async {
     try {
-      final detail = await sl<HomeRemoteSource>().getProviderDetail(widget.provider.id);
-      setState(() {
-        _detail = detail;
-        _loading = false;
-      });
+      final detail = await sl<HomeRemoteSource>()
+          .getProviderDetail(widget.provider.id)
+          .timeout(const Duration(seconds: 8));
+      if (mounted)
+        setState(() {
+          _detail = detail;
+          _loadingDetail = false;
+        });
     } catch (_) {
-      setState(() {
-        _detail = widget.provider;
-        _loading = false;
-      });
+      if (mounted)
+        setState(() {
+          _detail = widget.provider;
+          _loadingDetail = false;
+        });
+    }
+  }
+
+  Future<void> _loadSpareParts() async {
+    setState(() => _loadingParts = true);
+    try {
+      final parts = await sl<HomeRemoteSource>().getProviderSpareParts(
+        widget.provider.id,
+      );
+      if (mounted)
+        setState(() {
+          _spareParts = parts;
+          _loadingParts = false;
+        });
+    } catch (_) {
+      if (mounted) setState(() => _loadingParts = false);
+    }
+  }
+
+  Future<void> _loadReviews() async {
+    setState(() => _loadingReviews = true);
+    try {
+      // Calls the new method we added to the DataSource
+      final reviews = await sl<HomeRemoteSource>().getProviderReviews(
+        widget.provider.id,
+      );
+      if (mounted)
+        setState(() {
+          _reviews = reviews;
+          _loadingReviews = false;
+        });
+    } catch (_) {
+      if (mounted) setState(() => _loadingReviews = false);
     }
   }
 
@@ -6161,10 +6248,10 @@ class _GarageProfileScreenState extends State<GarageProfileScreen> {
       }
       setState(() => _isFavorite = !_isFavorite);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
-      }
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
@@ -6173,214 +6260,175 @@ class _GarageProfileScreenState extends State<GarageProfileScreen> {
     final p = _detail ?? widget.provider;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: CustomScrollView(
-        slivers: [
-          // ─── Header ────────────────────────────────
-          SliverAppBar(
-            expandedHeight: 200,
-            pinned: true,
-            backgroundColor: AppColors.primary,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-              onPressed: () => Navigator.pop(context),
-            ),
-            actions: [
-              IconButton(
-                icon: Icon(
-                  _isFavorite ? Icons.favorite : Icons.favorite_border,
-                  color: _isFavorite ? AppColors.error : Colors.white,
+      backgroundColor: const Color(0xFF6B7280),
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
+              // --- Header Section ---
+              SliverAppBar(
+                expandedHeight: 220,
+                pinned: true,
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                leading: _buildCircleAction(
+                  Icons.arrow_back,
+                  () => Navigator.pop(context),
                 ),
-                onPressed: _toggleFavorite,
+                actions: [
+                  _buildCircleAction(
+                    _isFavorite ? Icons.favorite : Icons.favorite_border,
+                    _toggleFavorite,
+                    color: _isFavorite ? AppColors.error : Colors.black,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                flexibleSpace: FlexibleSpaceBar(
+                  background: Center(
+                    child: Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white24, width: 2),
+                      ),
+                      child: const Icon(
+                        Icons.store_outlined,
+                        color: Colors.white,
+                        size: 44,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // --- Main Card ---
+              SliverToBoxAdapter(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(32),
+                    ),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 140),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(p.businessName, style: AppTextStyles.h2),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          _buildBadge(
+                            Icons.verified,
+                            "Verified",
+                            AppColors.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildBadge(
+                            Icons.star,
+                            "Expert",
+                            Colors.grey.shade600,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on,
+                            color: AppColors.primary,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            p.address ?? "Bole, Addis Ababa",
+                            style: AppTextStyles.bodySmall,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      TabBar(
+                        controller: _tabController,
+                        isScrollable: true,
+                        tabAlignment: TabAlignment.start,
+                        indicatorColor: AppColors.actionOrange,
+                        labelColor: AppColors.actionOrange,
+                        unselectedLabelColor: Colors.grey,
+                        labelStyle: AppTextStyles.label.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        dividerColor: Colors.transparent,
+                        tabs: const [
+                          Tab(text: "Services"),
+                          Tab(text: "Spare Parts"),
+                          Tab(text: "Reviews"),
+                          Tab(text: "Info"),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      // AnimatedBuilder makes sure the content UI refreshes when _tabController changes
+                      AnimatedBuilder(
+                        animation: _tabController,
+                        builder: (context, _) => _buildTabContent(p),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      AppColors.primary,
-                      AppColors.primary.withValues(alpha: 0.8),
-                    ],
-                  ),
-                ),
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(height: 60),
-                      Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(Icons.store_outlined, color: Colors.white, size: 36),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        p.businessName,
-                        style: AppTextStyles.h3.copyWith(color: Colors.white),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
           ),
 
-          // ─── Info Cards ────────────────────────────
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(AppDimensions.screenPadding),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Stats row
-                  Row(
-                    children: [
-                      _StatChip(
-                        icon: Icons.star_outline,
-                        label: p.rating?.toStringAsFixed(1) ?? 'N/A',
-                        subtitle: '${p.reviewCount ?? 0} reviews',
-                      ),
-                      const SizedBox(width: 12),
-                      _StatChip(
-                        icon: Icons.location_on_outlined,
-                        label: p.distanceKm != null
-                            ? '${p.distanceKm!.toStringAsFixed(1)} km'
-                            : '—',
-                        subtitle: 'Distance',
-                      ),
-                      const SizedBox(width: 12),
-                      _StatChip(
-                        icon: Icons.circle,
-                        iconColor: p.isOnline ? AppColors.success : AppColors.disabled,
-                        label: p.isOnline ? 'Open' : 'Closed',
-                        subtitle: 'Status',
-                      ),
-                    ],
+          // --- Bottom Buttons (Fixed Overflow) ---
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, -5),
                   ),
-                  const SizedBox(height: AppDimensions.lg),
-
-                  // Contact
-                  if (p.phone != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(AppDimensions.md),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.phone_outlined, color: AppColors.primary, size: 22),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Phone', style: AppTextStyles.caption),
-                                Text(p.phone!, style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w500)),
-                              ],
-                            ),
-                          ),
-                          AppButton(
-                            label: 'Call',
-                            icon: Icons.phone,
-                            size: AppButtonSize.small,
-                            width: 90,
-                            onPressed: () {
-                              // Phone call intent
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppDimensions.md),
-                  ],
-
-                  // Address
-                  if (p.address != null)
-                    Container(
-                      padding: const EdgeInsets.all(AppDimensions.md),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.location_on_outlined, color: AppColors.primary, size: 22),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Address', style: AppTextStyles.caption),
-                                Text(p.address!, style: AppTextStyles.bodyMedium),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Services offered
-                  if (p.serviceTypes.isNotEmpty) ...[
-                    const SizedBox(height: AppDimensions.lg),
-                    const Text('Services', style: AppTextStyles.sectionHeader),
-                    const SizedBox(height: AppDimensions.sm),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: p.serviceTypes.map((s) {
-                        return Chip(
-                          label: Text(s),
-                          backgroundColor: AppColors.primary.withValues(alpha: 0.08),
-                          side: BorderSide.none,
-                          labelStyle: AppTextStyles.caption.copyWith(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-
-                  const SizedBox(height: AppDimensions.xl),
-
-                  // Action buttons
-                  AppButton(
-                    label: 'Request Service',
-                    icon: Icons.build_outlined,
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => RequestDetailsScreen(provider: p),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: AppDimensions.md),
-                  AppButton(
-                    label: 'View Spare Parts',
-                    variant: AppButtonVariant.secondary,
-                    icon: Icons.settings_outlined,
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => _SparePartsSheet(providerId: p.id),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: AppDimensions.xxl),
                 ],
+              ),
+              child: SafeArea(
+                top: false,
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: AppButton(
+                        label: 'Call',
+                        variant: AppButtonVariant.secondary,
+                        icon: Icons.phone_outlined,
+                        onPressed: () {},
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 4,
+                      child: AppButton(
+                        label: 'Request Service',
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => RequestDetailsScreen(provider: p),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -6388,127 +6436,339 @@ class _GarageProfileScreenState extends State<GarageProfileScreen> {
       ),
     );
   }
-}
 
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final Color? iconColor;
-  final String label;
-  final String subtitle;
+  Widget _buildTabContent(ProviderModel p) {
+    switch (_tabController.index) {
+      case 0:
+        return _buildServicesView(p);
+      case 1:
+        return _buildSparePartsView();
+      case 2:
+        return _buildReviewsView(p);
+      case 3:
+        return _buildInfoView(p);
+      default:
+        return const SizedBox();
+    }
+  }
 
-  const _StatChip({
-    required this.icon,
-    this.iconColor,
-    required this.label,
-    required this.subtitle,
-  });
+  Widget _buildServicesView(ProviderModel p) {
+    // If backend doesn't provide prices, show defaults
+    return Column(
+      children: [
+        _buildPriceItem("Oil Change", "Includes filter & labor", "1,500 ETB"),
+        _buildPriceItem("Diagnostics", "Full system scan", "500 ETB"),
+        _buildPriceItem("Brake Repair", "Labor only", "800 ETB"),
+        _buildPriceItem("Engine Tune-up", "Spark plugs & filter", "2,000 ETB"),
+      ],
+    );
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+  Widget _buildSparePartsView() {
+    if (_loadingParts)
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(30),
+          child: CircularProgressIndicator(),
         ),
-        child: Column(
+      );
+    if (_spareParts.isEmpty)
+      return const EmptyView(
+        title: "No spare parts",
+        subtitle: "This garage hasn't uploaded inventory.",
+      );
+    return Column(
+      children: _spareParts
+          .map(
+            (part) => _buildPriceItem(
+              part['name'] ?? 'Part',
+              part['category'] ?? 'Spare Part',
+              "${part['price'] ?? '0'} ETB",
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Widget _buildReviewsView(ProviderModel p) {
+    if (_loadingReviews)
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(30),
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Icon(icon, color: iconColor ?? AppColors.primary, size: 20),
-            const SizedBox(height: 6),
-            Text(label, style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w600)),
-            Text(subtitle, style: AppTextStyles.caption),
+            // Use Expanded for the title so the button has a fixed width
+            Expanded(
+              child: Text("User Reviews", style: AppTextStyles.sectionHeader),
+            ),
+            const SizedBox(width: 8),
+            AppButton(
+              label: "Rate Now",
+              size: AppButtonSize.small,
+              width: 95, // Set a specific width that fits your screen
+              onPressed: () => _showWriteReviewDialog(p.id),
+            ),
+          ],
+        ),
+        const Divider(height: 32),
+        if (_loadingReviews)
+          const Center(child: CircularProgressIndicator())
+        else if (_reviews.isEmpty)
+          const Center(child: Text("No reviews yet."))
+        else
+          ..._reviews.map((rev) => _buildReviewItem(rev)),
+      ],
+    );
+  }
+
+  // POP-UP DIALOG FOR WRITING A REVIEW
+  void _showWriteReviewDialog(int providerId) {
+    int selectedRating = 5;
+    final commentController = TextEditingController();
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text("Rate this Garage"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // FIXED OVERFLOW: FittedBox ensures stars fit on narrow screens like Infinix
+              FittedBox(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    5,
+                    (index) => IconButton(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      constraints: const BoxConstraints(),
+                      onPressed: isSubmitting
+                          ? null
+                          : () => setDialogState(
+                              () => selectedRating = index + 1,
+                            ),
+                      icon: Icon(
+                        index < selectedRating ? Icons.star : Icons.star_border,
+                        color: AppColors.warning,
+                        size: 32,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: commentController,
+                enabled: !isSubmitting,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: "Share your experience...",
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+              ),
+              onPressed: isSubmitting
+                  ? null
+                  : () async {
+                      setDialogState(() => isSubmitting = true);
+                      try {
+                        await sl<HomeRemoteSource>().submitGarageReview(
+                          providerId: providerId,
+                          rating: selectedRating,
+                          comment: commentController.text,
+                        );
+                        if (mounted) {
+                          Navigator.pop(ctx);
+                          _loadReviews();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Review submitted!"),
+                              backgroundColor: AppColors.success,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        setDialogState(() => isSubmitting = false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(e.toString()),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                      }
+                    },
+              child: isSubmitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Text("Submit", style: TextStyle(color: Colors.white)),
+            ),
           ],
         ),
       ),
     );
   }
-}
 
-class _SparePartsSheet extends StatefulWidget {
-  final int providerId;
-  const _SparePartsSheet({required this.providerId});
-
-  @override
-  State<_SparePartsSheet> createState() => _SparePartsSheetState();
-}
-
-class _SparePartsSheetState extends State<_SparePartsSheet> {
-  List<Map<String, dynamic>> _parts = [];
-  bool _loading = true;
-  final _searchCtrl = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load({String? search}) async {
-    setState(() => _loading = true);
-    try {
-      final parts = await sl<HomeRemoteSource>().getProviderSpareParts(
-        widget.providerId,
-        search: search,
-      );
-      setState(() {
-        _parts = parts;
-        _loading = false;
-      });
-    } catch (_) {
-      setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Spare Parts')),
-      body: Column(
+  Widget _buildReviewItem(Map<String, dynamic> rev) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(AppDimensions.screenPadding),
-            child: AppTextField(
-              controller: _searchCtrl,
-              hint: 'Search parts...',
-              prefix: const Icon(Icons.search, size: 20),
-              onChanged: (v) => _load(search: v.isEmpty ? null : v),
+          Row(
+            children: [
+              Text(
+                rev['user_name'] ?? 'User',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              Row(
+                children: List.generate(
+                  5,
+                  (index) => Icon(
+                    Icons.star,
+                    size: 12,
+                    color: index < (rev['rating'] ?? 0)
+                        ? AppColors.warning
+                        : Colors.grey.shade300,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(rev['comment'] ?? '', style: AppTextStyles.bodySmall),
+          const SizedBox(height: 4),
+          if (rev['created_at'] != null)
+            Text(
+              rev['created_at'].toString().substring(0, 10),
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoView(ProviderModel p) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Contact Info",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        ListTile(
+          leading: const Icon(Icons.phone, size: 18),
+          title: Text(p.phone ?? 'Not provided'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        ListTile(
+          leading: const Icon(Icons.access_time, size: 18),
+          title: const Text('Open 8:00 AM - 6:00 PM'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ],
+    );
+  }
+
+  // UI Reusable Helpers
+  Widget _buildCircleAction(
+    IconData icon,
+    VoidCallback onTap, {
+    Color color = Colors.black,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: CircleAvatar(
+        backgroundColor: Colors.white,
+        child: IconButton(
+          icon: Icon(icon, color: color, size: 20),
+          onPressed: onTap,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(IconData icon, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriceItem(String title, String desc, String price) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        children: [
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _parts.isEmpty
-                    ? const EmptyView(
-                        title: 'No spare parts found',
-                        icon: Icons.settings_outlined,
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: AppDimensions.screenPadding),
-                        itemCount: _parts.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (_, i) {
-                          final part = _parts[i];
-                          return ListTile(
-                            contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                            leading: const Icon(Icons.settings_outlined, color: AppColors.primary),
-                            title: Text(
-                              part['name'] ?? '',
-                              style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w500),
-                            ),
-                            subtitle: Text(part['category'] ?? '', style: AppTextStyles.caption),
-                            trailing: part['price'] != null
-                                ? Text(
-                                    '${part['price']} ETB',
-                                    style: AppTextStyles.bodyMedium.copyWith(
-                                      color: AppColors.accent,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  )
-                                : null,
-                          );
-                        },
-                      ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  desc,
+                  style: const TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            price,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
           ),
         ],
       ),
@@ -8026,7 +8286,7 @@ class _RequestHistoryDetailScreenState
     setState(() => _submittingReview = true);
     try {
       await sl<HomeRemoteSource>().submitReview(
-        widget.requestId,
+        requestId: widget.requestId, // Fixes the red squiggle
         rating: _rating,
         comment: _commentCtrl.text.trim(),
         tags: _selectedTags,
@@ -8100,7 +8360,7 @@ class _RequestHistoryDetailScreenState
             children: [
               Expanded(
                 child: Text(
-                  _request!.providerName ?? 'Garage',
+                  _request!.providerName ?? 'Garage', // Changed to match
                   style: AppTextStyles.h3,
                 ),
               ),
@@ -8120,79 +8380,93 @@ class _RequestHistoryDetailScreenState
 
   Widget _buildReviewSection() {
     return Container(
-      padding: const EdgeInsets.all(AppDimensions.cardPadding),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Rate your experience', style: AppTextStyles.sectionHeader),
+          const Text(
+            "Rate your experience",
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 16),
-
-          // STAR RATING
+          // Stars Row
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(5, (index) {
-              return IconButton(
+            children: List.generate(
+              5,
+              (index) => IconButton(
                 onPressed: () => setState(() => _rating = index + 1),
                 icon: Icon(
                   index < _rating ? Icons.star : Icons.star_border,
                   color: AppColors.warning,
-                  size: 36,
+                  size: 30,
                 ),
-              );
-            }),
-          ),
-
-          const SizedBox(height: 20),
-          Text('What did you like?', style: AppTextStyles.label),
-          const SizedBox(height: 8),
-
-          // TAGS
-          Wrap(
-            spacing: 8,
-            children: _availableTags.map((tag) {
-              final isSelected = _selectedTags.contains(tag);
-              return ChoiceChip(
-                label: Text(tag.replaceAll('_', ' ')),
-                selected: isSelected,
-                onSelected: (selected) {
-                  setState(() {
-                    selected
-                        ? _selectedTags.add(tag)
-                        : _selectedTags.remove(tag);
-                  });
-                },
-                selectedColor: AppColors.primary,
-                labelStyle: TextStyle(
-                  color: isSelected ? Colors.white : Colors.black,
-                ),
-              );
-            }).toList(),
-          ),
-
-          const SizedBox(height: 20),
-
-          // COMMENT BOX
-          TextField(
-            controller: _commentCtrl,
-            maxLines: 3,
-            decoration: InputDecoration(
-              hintText: 'Add a comment (optional)',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
               ),
             ),
           ),
-
-          const SizedBox(height: 24),
-
+          const SizedBox(height: 16),
+          // Tags (Documentation mentions: fast_service, professional, friendly)
+          Wrap(
+            spacing: 8,
+            children: ['fast_service', 'professional', 'friendly'].map((tag) {
+              final isSelected = _selectedTags.contains(tag);
+              return ChoiceChip(
+                label: Text(
+                  tag.replaceAll('_', ' '),
+                  style: const TextStyle(fontSize: 11),
+                ),
+                selected: isSelected,
+                onSelected: (val) {
+                  setState(
+                    () => val
+                        ? _selectedTags.add(tag)
+                        : _selectedTags.remove(tag),
+                  );
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _commentCtrl,
+            decoration: const InputDecoration(
+              hintText: "Add a comment...",
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 2,
+          ),
+          const SizedBox(height: 16),
           AppButton(
-            label: 'Submit Review',
+            label: "Submit Review",
             isLoading: _submittingReview,
-            onPressed: _submitReview,
+            onPressed: () async {
+              if (_rating == 0) return;
+              setState(() => _submittingReview = true);
+              try {
+                await sl<HomeRemoteSource>().submitReview(
+                  requestId: widget.requestId,
+                  rating: _rating,
+                  tags: _selectedTags,
+                  comment: _commentCtrl.text,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text("Thank you!")));
+              } catch (e) {
+                setState(() => _submittingReview = false);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(e.toString()),
+                    backgroundColor: AppColors.error,
+                  ),
+                );
+              }
+            },
           ),
         ],
       ),
@@ -8220,8 +8494,6 @@ class _RequestHistoryDetailScreenState
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import '../../../../core/config/app_config.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -8248,10 +8520,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
   Timer? _timer;
   String _status = 'PENDING';
   String? _eta;
-  double? _providerLat;
-  double? _providerLng;
   bool _loading = true;
-  bool _cancelling = false;
 
   @override
   void initState() {
@@ -8274,266 +8543,117 @@ class _TrackingScreenState extends State<TrackingScreen> {
       if (mounted) {
         setState(() {
           _status = response['status'] ?? _status;
-
-          // Updated: Backend uses eta_minutes
-          if (response['eta_minutes'] != null) {
+          if (response['eta_minutes'] != null)
             _eta = "${response['eta_minutes']} mins";
-          }
-
-          _providerLat = _d(response['provider_lat']);
-          _providerLng = _d(response['provider_lng']);
           _loading = false;
         });
-
-        if ([
-          'COMPLETED',
-          'CANCELLED',
-          'REJECTED',
-        ].contains(_status.toUpperCase())) {
+        if (['COMPLETED', 'CANCELLED'].contains(_status.toUpperCase()))
           _timer?.cancel();
-        }
       }
     } catch (_) {}
   }
 
-  Future<void> _cancel() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cancel Request?'),
-        content: const Text('Are you sure you want to cancel this request?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('No'),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(title: const Text('Live Status'), elevation: 0),
+      body: Column(
+        children: [
+          const Spacer(),
+          // LARGE STATUS ICON (Replaced the Map)
+          Container(
+            width: 140,
+            height: 140,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(_statusIcon, color: AppColors.primary, size: 70),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Yes, cancel',
-              style: TextStyle(color: AppColors.error),
+          const SizedBox(height: 32),
+          Text(
+            _statusMessage,
+            style: AppTextStyles.h2,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          StatusBadge.fromRequestStatus(_status),
+
+          if (_eta != null && _status.toUpperCase() == 'EN_ROUTE') ...[
+            const SizedBox(height: 40),
+            Text("Estimated Arrival", style: AppTextStyles.caption),
+            Text(
+              _eta!,
+              style: AppTextStyles.h1.copyWith(color: AppColors.actionOrange),
+            ),
+          ],
+          const Spacer(),
+
+          // INFO CARD
+          Container(
+            padding: const EdgeInsets.all(24),
+            margin: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.inputFill,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.store_outlined,
+                  color: AppColors.primary,
+                  size: 28,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.garageName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const Text(
+                        "Service Provider",
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                AppIconButton(icon: Icons.phone, onPressed: () {}),
+              ],
             ),
           ),
+          const SizedBox(height: 20),
         ],
       ),
     );
-
-    if (confirmed != true) return;
-
-    setState(() => _cancelling = true);
-    try {
-      await sl<HomeRemoteSource>().cancelRequest(
-        widget.requestId,
-        reason: 'User cancelled',
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Request cancelled'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString()),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _cancelling = false);
-    }
-  }
-
-  double? _d(dynamic v) {
-    if (v == null) return null;
-    if (v is double) return v;
-    if (v is int) return v.toDouble();
-    if (v is String) return double.tryParse(v);
-    return null;
   }
 
   String get _statusMessage => switch (_status.toUpperCase()) {
     'PENDING' => 'Waiting for the garage to accept...',
-    'ACCEPTED' => 'Request accepted! Preparing to leave.',
-    'EN_ROUTE' ||
-    'ON_THE_WAY' => 'Provider is on the way to you!', // Added alias
+    'ACCEPTED' => 'Request Accepted!',
+    'EN_ROUTE' || 'ON_THE_WAY' => 'Provider is on the way!',
     'ARRIVED' => 'Provider has arrived!',
-    'IN_PROGRESS' => 'Work in progress...',
-    'COMPLETED' => 'Service finished!',
-    _ => 'Updating status...',
+    'IN_PROGRESS' => 'Fixing your vehicle...',
+    'COMPLETED' => 'Service Completed!',
+    _ => 'Connecting...',
   };
+
   IconData get _statusIcon => switch (_status.toUpperCase()) {
-    'PENDING' => Icons.hourglass_top_outlined,
+    'PENDING' => Icons.hourglass_top,
     'ACCEPTED' => Icons.check_circle_outline,
-    'EN_ROUTE' => Icons.local_shipping_outlined,
-    'ARRIVED' => Icons.place_outlined,
-    'IN_PROGRESS' => Icons.build_outlined,
-    'COMPLETED' => Icons.celebration_outlined,
-    'CANCELLED' => Icons.cancel_outlined,
-    _ => Icons.info_outline,
+    'EN_ROUTE' => Icons.local_shipping,
+    'ARRIVED' => Icons.location_on,
+    'IN_PROGRESS' => Icons.build,
+    'COMPLETED' => Icons.verified,
+    _ => Icons.sync,
   };
-
-  bool get _canCancel =>
-      ['PENDING', 'ACCEPTED', 'EN_ROUTE'].contains(_status.toUpperCase());
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Live Tracking'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: Column(
-        children: [
-          // Map
-          Expanded(
-            child: FlutterMap(
-              options: MapOptions(
-                initialCenter: LatLng(
-                  _providerLat ?? AppConfig.defaultLat,
-                  _providerLng ?? AppConfig.defaultLng,
-                ),
-                initialZoom: 14,
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: AppConfig.mapTileUrl,
-                  userAgentPackageName: AppConfig.mapUserAgent,
-                ),
-                if (_providerLat != null && _providerLng != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: LatLng(_providerLat!, _providerLng!),
-                        width: 44,
-                        height: 44,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.accent,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 3),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.accent.withValues(alpha: 0.3),
-                                blurRadius: 12,
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.local_shipping,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-          // Status panel
-          Container(
-            padding: const EdgeInsets.all(AppDimensions.lg),
-            decoration: const BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              boxShadow: [
-                BoxShadow(color: AppColors.cardShadow, blurRadius: 16),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.border,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: AppDimensions.md),
-                Row(
-                  children: [
-                    Icon(_statusIcon, color: AppColors.primary, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                widget.garageName,
-                                style: AppTextStyles.bodyLarge.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              StatusBadge.fromRequestStatus(_status),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(_statusMessage, style: AppTextStyles.bodySmall),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                if (_eta != null) ...[
-                  const SizedBox(height: AppDimensions.md),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(
-                        AppDimensions.radiusMd,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.access_time,
-                          color: AppColors.primary,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'ETA: $_eta',
-                          style: AppTextStyles.bodyMedium.copyWith(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                if (_canCancel) ...[
-                  const SizedBox(height: AppDimensions.md),
-                  AppButton(
-                    label: 'Cancel Request',
-                    variant: AppButtonVariant.text,
-                    isLoading: _cancelling,
-                    onPressed: _cancel,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 

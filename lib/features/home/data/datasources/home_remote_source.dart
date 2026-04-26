@@ -57,25 +57,27 @@ class HomeRemoteSource {
     double? radiusKm,
     bool? isOnline,
     int? serviceTypeId,
-    double? minRating,
     String? sortBy,
+    int? limit,
   }) async {
     try {
       final params = <String, dynamic>{'lat': lat, 'lng': lng};
       if (radiusKm != null) params['radius_km'] = radiusKm;
       if (isOnline != null) params['is_online'] = isOnline;
       if (serviceTypeId != null) params['service_type_id'] = serviceTypeId;
+      if (limit != null) params['limit'] = limit;
 
       final r = await dio.get('providers/nearby', queryParameters: params);
 
-      // FIX: Access 'results' inside 'data'
-      final dynamic responseData = r.data['data'];
-      if (responseData != null && responseData['results'] is List) {
-        final List list = responseData['results'];
-        return list.map((e) => ProviderModel.fromJson(e)).toList();
-      }
-      return [];
+      // DEBUG PRINT - THIS HELPS US DISCOVER THE PROBLEM
+      print("EXPLORE API RESPONSE: ${r.data}");
+
+      final dynamic data = r.data['data'];
+      final List results = (data is Map) ? (data['results'] ?? []) : [];
+
+      return results.map((e) => ProviderModel.fromJson(e)).toList();
     } on DioException catch (e) {
+      print("EXPLORE API ERROR: ${e.response?.data}");
       throw _err(e);
     }
   }
@@ -213,32 +215,26 @@ class HomeRemoteSource {
     required double lng,
     String? address,
     bool isScheduled = false,
-    String? scheduledTime,
     File? photo,
   }) async {
     try {
-      // The backend expects "location" as a stringified JSON object in the form-data
-      final locationData =
-          '{"lat": $lat, "lng": $lng, "address": "${address ?? "Current Location"}"}';
+      // Documentation requires location as a JSON string object inside FormData
+      final locationJson =
+          '{"lat": $lat, "lng": $lng, "address": "${address ?? "Addis Ababa"}"}';
 
       final formData = FormData.fromMap({
         'provider_id': providerId,
         'service_type_id': serviceTypeId,
         'vehicle_id': vehicleId,
         'description': description,
-        'is_scheduled': isScheduled, // True/False
-        'location': locationData, // JSON string matches curl example
-        if (isScheduled && scheduledTime != null)
-          'scheduled_time': scheduledTime,
-        if (photo != null)
-          'photo': await MultipartFile.fromFile(
-            photo.path,
-            filename: 'incident_photo.jpg',
-          ),
+        'is_scheduled': isScheduled
+            .toString(), // multipart fields are usually strings
+        'location': locationJson,
+        if (photo != null) 'photo': await MultipartFile.fromFile(photo.path),
       });
 
       final r = await dio.post('requests/', data: formData);
-      return ServiceRequestModel.fromJson(r.data['data'] ?? r.data);
+      return ServiceRequestModel.fromJson(r.data['data']);
     } on DioException catch (e) {
       throw _err(e);
     }
@@ -280,7 +276,7 @@ class HomeRemoteSource {
 
   Future<void> cancelRequest(int id, {String? reason}) async {
     try {
-      // CHANGE dio.post to dio.patch
+      // DOCUMENTATION FIX: Must use PATCH
       await dio.patch(
         'requests/$id/cancel',
         data: {if (reason != null) 'reason': reason},
@@ -312,19 +308,13 @@ class HomeRemoteSource {
     String? comment,
   }) async {
     try {
-      // Removed the / at the end of reviews to fix the 404 error
+      // DOCUMENTATION FIX: Endpoint is requests/{id}/reviews
       await dio.post(
         'requests/$requestId/reviews',
-        data: {'rating': rating, 'tags': tags, 'comment': comment ?? ""},
+        data: {'rating': rating, 'tags': tags, 'comment': comment},
       );
     } on DioException catch (e) {
-      // Log details if it fails so we can see the server response
-      print("SERVER ERROR: ${e.response?.data}");
-      String msg = "Failed to submit review";
-      if (e.response?.data is Map) {
-        msg = e.response?.data['message'] ?? msg;
-      }
-      throw Exception(msg);
+      throw _err(e);
     }
   }
 
@@ -495,15 +485,23 @@ class HomeRemoteSource {
 
   Future<List<Map<String, dynamic>>> getProviderReviews(int providerId) async {
     try {
+      // Documentation path: providers/{id}/reviews (no trailing slash)
       final r = await dio.get('providers/$providerId/reviews');
+
       final dynamic responseBody = r.data;
       List<dynamic> items = [];
 
+      // Backend can return data: [...] OR data: { results: [...] }
       if (responseBody['data'] != null) {
-        items = responseBody['data'] is List
-            ? responseBody['data']
-            : responseBody['data']['results'] ?? [];
+        if (responseBody['data'] is List) {
+          items = responseBody['data'];
+        } else if (responseBody['data']['results'] is List) {
+          items = responseBody['data']['results'];
+        }
+      } else if (responseBody is List) {
+        items = responseBody;
       }
+
       return items.cast<Map<String, dynamic>>();
     } on DioException catch (e) {
       throw _err(e);

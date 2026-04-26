@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../../../core/theme/app_dimensions.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../data/datasources/home_remote_source.dart';
@@ -21,21 +20,10 @@ class _RequestHistoryDetailScreenState
     extends State<RequestHistoryDetailScreen> {
   ServiceRequestModel? _request;
   bool _loading = true;
-
-  // Review Form State
   int _rating = 0;
   final _commentCtrl = TextEditingController();
   final List<String> _selectedTags = [];
   bool _submittingReview = false;
-
-  // Available tags from backend documentation
-  final List<String> _availableTags = [
-    'fast_service',
-    'professional',
-    'friendly',
-    'fair_price',
-    'expert',
-  ];
 
   @override
   void initState() {
@@ -55,46 +43,6 @@ class _RequestHistoryDetailScreenState
     }
   }
 
-  Future<void> _submitReview() async {
-    if (_rating == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a star rating')),
-      );
-      return;
-    }
-
-    setState(() => _submittingReview = true);
-    try {
-      await sl<HomeRemoteSource>().submitReview(
-        requestId: widget.requestId, // Fixes the red squiggle
-        rating: _rating,
-        comment: _commentCtrl.text.trim(),
-        tags: _selectedTags,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Thank you for your review!'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-        Navigator.pop(context); // Return to activity list
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString()),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _submittingReview = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -103,18 +51,18 @@ class _RequestHistoryDetailScreenState
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _request == null
-          ? const Center(child: Text('Request details not found'))
+          ? const Center(child: Text('Request not found'))
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(AppDimensions.screenPadding),
+              padding: const EdgeInsets.all(16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildSummaryCard(),
-
-                  // ONLY SHOW REVIEW SECTION IF COMPLETED
                   if (_request!.status.toUpperCase() == 'COMPLETED') ...[
                     const SizedBox(height: 24),
-                    _buildReviewSection(),
+                    // Check if rating exists to show "Your Feedback"
+                    (_request!.rating != null && _request!.rating! > 0)
+                        ? _buildExistingReview()
+                        : _buildReviewForm(),
                   ],
                 ],
               ),
@@ -124,33 +72,29 @@ class _RequestHistoryDetailScreenState
 
   Widget _buildSummaryCard() {
     return Container(
-      padding: const EdgeInsets.all(AppDimensions.cardPadding),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
-        boxShadow: const [
-          BoxShadow(color: AppColors.cardShadow, blurRadius: 10),
-        ],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
                 child: Text(
-                  _request!.providerName ?? 'Garage', // Changed to match
+                  _request!.providerName ?? 'Garage',
                   style: AppTextStyles.h3,
                 ),
               ),
               StatusBadge.fromRequestStatus(_request!.status),
             ],
           ),
-          const Divider(height: 24),
-          _infoRow('Service', _request!.serviceType ?? 'General Repair'),
-          _infoRow('Vehicle', _request!.vehicleName ?? 'My Vehicle'),
-          _infoRow('Date', _request!.createdAt?.substring(0, 10) ?? 'N/A'),
+          const Divider(height: 32),
+          _infoRow('Service', _request!.serviceType ?? 'General'),
+          _infoRow('Vehicle', _request!.vehicleName ?? 'Vehicle'),
+          _infoRow('Date', _request!.createdAt?.substring(0, 10) ?? ''),
           if (_request!.description != null)
             _infoRow('Issue', _request!.description!),
         ],
@@ -158,7 +102,49 @@ class _RequestHistoryDetailScreenState
     );
   }
 
-  Widget _buildReviewSection() {
+  Widget _buildExistingReview() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.green.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Your Feedback",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              Row(
+                children: List.generate(
+                  5,
+                  (i) => Icon(
+                    Icons.star,
+                    size: 18,
+                    color: i < (_request!.rating ?? 0)
+                        ? Colors.orange
+                        : Colors.grey[200],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _request!.reviewComment ?? "No written comment was provided.",
+            style: const TextStyle(fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewForm() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -166,60 +152,37 @@ class _RequestHistoryDetailScreenState
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             "Rate your experience",
-            style: TextStyle(fontWeight: FontWeight.bold),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
-          const SizedBox(height: 16),
-          // Stars Row
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(
               5,
-              (index) => IconButton(
-                onPressed: () => setState(() => _rating = index + 1),
+              (i) => IconButton(
+                onPressed: () => setState(() => _rating = i + 1),
                 icon: Icon(
-                  index < _rating ? Icons.star : Icons.star_border,
-                  color: AppColors.warning,
-                  size: 30,
+                  i < _rating ? Icons.star : Icons.star_border,
+                  color: Colors.orange,
+                  size: 36,
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          // Tags (Documentation mentions: fast_service, professional, friendly)
-          Wrap(
-            spacing: 8,
-            children: ['fast_service', 'professional', 'friendly'].map((tag) {
-              final isSelected = _selectedTags.contains(tag);
-              return ChoiceChip(
-                label: Text(
-                  tag.replaceAll('_', ' '),
-                  style: const TextStyle(fontSize: 11),
-                ),
-                selected: isSelected,
-                onSelected: (val) {
-                  setState(
-                    () => val
-                        ? _selectedTags.add(tag)
-                        : _selectedTags.remove(tag),
-                  );
-                },
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           TextField(
             controller: _commentCtrl,
-            decoration: const InputDecoration(
-              hintText: "Add a comment...",
-              border: OutlineInputBorder(),
-            ),
             maxLines: 2,
+            decoration: InputDecoration(
+              hintText: "Add a comment...",
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           AppButton(
             label: "Submit Review",
             isLoading: _submittingReview,
@@ -233,18 +196,9 @@ class _RequestHistoryDetailScreenState
                   tags: _selectedTags,
                   comment: _commentCtrl.text,
                 );
-                Navigator.pop(context);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text("Thank you!")));
+                _load();
               } catch (e) {
                 setState(() => _submittingReview = false);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(e.toString()),
-                    backgroundColor: AppColors.error,
-                  ),
-                );
               }
             },
           ),
@@ -253,16 +207,20 @@ class _RequestHistoryDetailScreenState
     );
   }
 
-  Widget _infoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 80, child: Text(label, style: AppTextStyles.caption)),
-          Expanded(child: Text(value, style: AppTextStyles.bodyMedium)),
-        ],
-      ),
-    );
-  }
+  Widget _infoRow(String l, String v) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            l,
+            style: const TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+        ),
+        Expanded(child: Text(v, style: const TextStyle(fontSize: 14))),
+      ],
+    ),
+  );
 }

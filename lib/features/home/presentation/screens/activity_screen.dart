@@ -64,8 +64,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 final req = requests[index];
                 // Using business_name for the Garage
                 final garage =
+                    req['provider_name'] ?? // Key from your docs
                     req['provider']?['business_name'] ??
-                    req['provider']?['name'] ??
+                    req['business_name'] ??
                     "Garage";
                 final status = req['status'] ?? "PENDING";
                 final id = req['request_id'] ?? req['id'];

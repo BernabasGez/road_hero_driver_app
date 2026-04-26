@@ -31,7 +31,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
   @override
   void initState() {
     super.initState();
+    // 1. Initial immediate poll
     _poll();
+    // 2. Start periodic polling (every 8 seconds per your config)
     _timer = Timer.periodic(AppConfig.trackingPollInterval, (_) => _poll());
   }
 
@@ -46,118 +48,181 @@ class _TrackingScreenState extends State<TrackingScreen> {
       final response = await sl<HomeRemoteSource>().getRequestTracking(
         widget.requestId,
       );
+
       if (mounted) {
         setState(() {
-          _status = response['status'] ?? _status;
-          if (response['eta_minutes'] != null)
+          // Update status - Ensure we handle case where status might be null
+          _status = response['status']?.toString().toUpperCase() ?? _status;
+
+          // Update ETA
+          if (response['eta_minutes'] != null) {
             _eta = "${response['eta_minutes']} mins";
+          } else if (response['eta'] != null) {
+            _eta = response['eta'].toString();
+          }
+
           _loading = false;
         });
-        if (['COMPLETED', 'CANCELLED'].contains(_status.toUpperCase()))
+
+        // Stop polling only if it reaches a terminal state
+        if (['COMPLETED', 'CANCELLED', 'REJECTED'].contains(_status)) {
           _timer?.cancel();
+          debugPrint("Polling stopped: Terminal state $_status reached.");
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("Tracking Poll Error: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(title: const Text('Live Status'), elevation: 0),
+      appBar: AppBar(
+        title: const Text('Live Status'),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+      ),
       body: Column(
         children: [
           const Spacer(),
-          // LARGE STATUS ICON (Replaced the Map)
+          // LARGE STATUS ICON
           Container(
-            width: 140,
-            height: 140,
+            width: 160,
+            height: 160,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
+              color: AppColors.primary.withOpacity(0.08),
               shape: BoxShape.circle,
             ),
-            child: Icon(_statusIcon, color: AppColors.primary, size: 70),
+            child: Icon(_statusIcon, color: AppColors.primary, size: 80),
           ),
           const SizedBox(height: 32),
-          Text(
-            _statusMessage,
-            style: AppTextStyles.h2,
-            textAlign: TextAlign.center,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              _statusMessage,
+              style: AppTextStyles.h2,
+              textAlign: TextAlign.center,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           StatusBadge.fromRequestStatus(_status),
 
-          if (_eta != null && _status.toUpperCase() == 'EN_ROUTE') ...[
+          // Show ETA only during transit
+          if (_eta != null &&
+              (_status == 'EN_ROUTE' ||
+                  _status == 'ON_THE_WAY' ||
+                  _status == 'ACCEPTED')) ...[
             const SizedBox(height: 40),
             Text("Estimated Arrival", style: AppTextStyles.caption),
+            const SizedBox(height: 4),
             Text(
               _eta!,
-              style: AppTextStyles.h1.copyWith(color: AppColors.actionOrange),
+              style: AppTextStyles.h1.copyWith(
+                color: AppColors.actionOrange,
+                fontSize: 36,
+              ),
             ),
           ],
           const Spacer(),
 
-          // INFO CARD
-          Container(
-            padding: const EdgeInsets.all(24),
-            margin: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.inputFill,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.store_outlined,
-                  color: AppColors.primary,
-                  size: 28,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.garageName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const Text(
-                        "Service Provider",
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                AppIconButton(icon: Icons.phone, onPressed: () {}),
-              ],
-            ),
-          ),
+          // PROVIDER INFO CARD
+          _buildInfoCard(),
           const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  String get _statusMessage => switch (_status.toUpperCase()) {
-    'PENDING' => 'Waiting for the garage to accept...',
-    'ACCEPTED' => 'Request Accepted!',
-    'EN_ROUTE' || 'ON_THE_WAY' => 'Provider is on the way!',
-    'ARRIVED' => 'Provider has arrived!',
-    'IN_PROGRESS' => 'Fixing your vehicle...',
-    'COMPLETED' => 'Service Completed!',
-    _ => 'Connecting...',
+  Widget _buildInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      margin: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.store_outlined,
+              color: AppColors.primary,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.garageName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const Text(
+                  "Service Provider",
+                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          // Call button
+          CircleAvatar(
+            backgroundColor: Colors.green.shade50,
+            child: IconButton(
+              icon: const Icon(Icons.phone, color: Colors.green, size: 20),
+              onPressed: () {
+                // Future: Integration with url_launcher to call provider
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- LOGIC MAPPING BASED ON BACKEND DOCS ---
+
+  String get _statusMessage => switch (_status) {
+    'PENDING' => 'Waiting for the garage to accept your request...',
+    'ACCEPTED' => 'The garage has accepted! Preparing tools...',
+    'EN_ROUTE' ||
+    'ON_THE_WAY' => 'The mechanic is currently on the way to you.',
+    'ARRIVED' => 'The mechanic has arrived at your location.',
+    'IN_PROGRESS' => 'Work is underway. Fixing your vehicle...',
+    'COMPLETED' => 'Service finished! Please proceed to payment.',
+    'CANCELLED' => 'This request was cancelled.',
+    'REJECTED' => 'The garage could not fulfill this request.',
+    _ => 'Updating status...',
   };
 
-  IconData get _statusIcon => switch (_status.toUpperCase()) {
-    'PENDING' => Icons.hourglass_top,
-    'ACCEPTED' => Icons.check_circle_outline,
-    'EN_ROUTE' => Icons.local_shipping,
-    'ARRIVED' => Icons.location_on,
-    'IN_PROGRESS' => Icons.build,
-    'COMPLETED' => Icons.verified,
+  IconData get _statusIcon => switch (_status) {
+    'PENDING' => Icons.hourglass_top_rounded,
+    'ACCEPTED' => Icons.assignment_turned_in_outlined,
+    'EN_ROUTE' || 'ON_THE_WAY' => Icons.local_shipping_outlined,
+    'ARRIVED' => Icons.location_on_rounded,
+    'IN_PROGRESS' => Icons.build_circle_outlined,
+    'COMPLETED' => Icons.check_circle_rounded,
+    'CANCELLED' || 'REJECTED' => Icons.cancel_outlined,
     _ => Icons.sync,
   };
 }
