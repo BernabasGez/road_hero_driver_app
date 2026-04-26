@@ -3778,25 +3778,27 @@ class HomeRemoteSource {
     double? radiusKm,
     bool? isOnline,
     int? serviceTypeId,
-    double? minRating,
     String? sortBy,
+    int? limit,
   }) async {
     try {
       final params = <String, dynamic>{'lat': lat, 'lng': lng};
       if (radiusKm != null) params['radius_km'] = radiusKm;
       if (isOnline != null) params['is_online'] = isOnline;
       if (serviceTypeId != null) params['service_type_id'] = serviceTypeId;
+      if (limit != null) params['limit'] = limit;
 
       final r = await dio.get('providers/nearby', queryParameters: params);
 
-      // FIX: Access 'results' inside 'data'
-      final dynamic responseData = r.data['data'];
-      if (responseData != null && responseData['results'] is List) {
-        final List list = responseData['results'];
-        return list.map((e) => ProviderModel.fromJson(e)).toList();
-      }
-      return [];
+      // DEBUG PRINT - THIS HELPS US DISCOVER THE PROBLEM
+      print("EXPLORE API RESPONSE: ${r.data}");
+
+      final dynamic data = r.data['data'];
+      final List results = (data is Map) ? (data['results'] ?? []) : [];
+
+      return results.map((e) => ProviderModel.fromJson(e)).toList();
     } on DioException catch (e) {
+      print("EXPLORE API ERROR: ${e.response?.data}");
       throw _err(e);
     }
   }
@@ -3934,32 +3936,26 @@ class HomeRemoteSource {
     required double lng,
     String? address,
     bool isScheduled = false,
-    String? scheduledTime,
     File? photo,
   }) async {
     try {
-      // The backend expects "location" as a stringified JSON object in the form-data
-      final locationData =
-          '{"lat": $lat, "lng": $lng, "address": "${address ?? "Current Location"}"}';
+      // Documentation requires location as a JSON string object inside FormData
+      final locationJson =
+          '{"lat": $lat, "lng": $lng, "address": "${address ?? "Addis Ababa"}"}';
 
       final formData = FormData.fromMap({
         'provider_id': providerId,
         'service_type_id': serviceTypeId,
         'vehicle_id': vehicleId,
         'description': description,
-        'is_scheduled': isScheduled, // True/False
-        'location': locationData, // JSON string matches curl example
-        if (isScheduled && scheduledTime != null)
-          'scheduled_time': scheduledTime,
-        if (photo != null)
-          'photo': await MultipartFile.fromFile(
-            photo.path,
-            filename: 'incident_photo.jpg',
-          ),
+        'is_scheduled': isScheduled
+            .toString(), // multipart fields are usually strings
+        'location': locationJson,
+        if (photo != null) 'photo': await MultipartFile.fromFile(photo.path),
       });
 
       final r = await dio.post('requests/', data: formData);
-      return ServiceRequestModel.fromJson(r.data['data'] ?? r.data);
+      return ServiceRequestModel.fromJson(r.data['data']);
     } on DioException catch (e) {
       throw _err(e);
     }
@@ -4001,7 +3997,7 @@ class HomeRemoteSource {
 
   Future<void> cancelRequest(int id, {String? reason}) async {
     try {
-      // CHANGE dio.post to dio.patch
+      // DOCUMENTATION FIX: Must use PATCH
       await dio.patch(
         'requests/$id/cancel',
         data: {if (reason != null) 'reason': reason},
@@ -4033,19 +4029,13 @@ class HomeRemoteSource {
     String? comment,
   }) async {
     try {
-      // Removed the / at the end of reviews to fix the 404 error
+      // DOCUMENTATION FIX: Endpoint is requests/{id}/reviews
       await dio.post(
         'requests/$requestId/reviews',
-        data: {'rating': rating, 'tags': tags, 'comment': comment ?? ""},
+        data: {'rating': rating, 'tags': tags, 'comment': comment},
       );
     } on DioException catch (e) {
-      // Log details if it fails so we can see the server response
-      print("SERVER ERROR: ${e.response?.data}");
-      String msg = "Failed to submit review";
-      if (e.response?.data is Map) {
-        msg = e.response?.data['message'] ?? msg;
-      }
-      throw Exception(msg);
+      throw _err(e);
     }
   }
 
@@ -4216,15 +4206,23 @@ class HomeRemoteSource {
 
   Future<List<Map<String, dynamic>>> getProviderReviews(int providerId) async {
     try {
+      // Documentation path: providers/{id}/reviews (no trailing slash)
       final r = await dio.get('providers/$providerId/reviews');
+
       final dynamic responseBody = r.data;
       List<dynamic> items = [];
 
+      // Backend can return data: [...] OR data: { results: [...] }
       if (responseBody['data'] != null) {
-        items = responseBody['data'] is List
-            ? responseBody['data']
-            : responseBody['data']['results'] ?? [];
+        if (responseBody['data'] is List) {
+          items = responseBody['data'];
+        } else if (responseBody['data']['results'] is List) {
+          items = responseBody['data']['results'];
+        }
+      } else if (responseBody is List) {
+        items = responseBody;
       }
+
       return items.cast<Map<String, dynamic>>();
     } on DioException catch (e) {
       throw _err(e);
@@ -4270,58 +4268,45 @@ class HomeRemoteSource {
 class ProviderModel {
   final int id;
   final String businessName;
-  final String? ownerName;
-  final String? phone;
-  final double? latitude;
-  final double? longitude;
-  final String? address;
   final double? rating;
   final int? reviewCount;
   final bool isOnline;
   final double? distanceKm;
-  final String? logo;
+  final double? latitude;
+  final double? longitude;
   final List<String> serviceTypes;
+  final String? phone;
 
   const ProviderModel({
     required this.id,
     required this.businessName,
-    this.ownerName,
-    this.phone,
-    this.latitude,
-    this.longitude,
-    this.address,
     this.rating,
     this.reviewCount,
     this.isOnline = false,
     this.distanceKm,
-    this.logo,
+    this.latitude,
+    this.longitude,
     this.serviceTypes = const [],
+    this.phone,
   });
 
   factory ProviderModel.fromJson(Map<String, dynamic> json) {
-    // 1. Get the nested location map
-    final locationMap = json['location'] as Map<String, dynamic>?;
-
+    final loc = json['location'] as Map<String, dynamic>?;
     return ProviderModel(
-      // 2. Map ID and Name
       id: json['provider_id'] ?? json['id'] ?? 0,
       businessName: json['business_name'] ?? json['name'] ?? 'Garage',
-
-      // 3. Map Nested Location
-      latitude: _parseDouble(locationMap?['lat']),
-      longitude: _parseDouble(locationMap?['lng']),
-
-      // 4. Map the rest
-      isOnline: json['is_online'] == true,
-      rating: _parseDouble(json['rating']),
+      rating: _d(json['rating'] ?? json['rating_avg']),
       reviewCount: json['review_count'] ?? 0,
-      distanceKm: _parseDouble(json['distance_km']),
-
-      // 5. Map services (Ensure this matches the string list in your JSON)
+      isOnline: json['is_online'] == true,
+      distanceKm: _d(json['distance_km']),
+      latitude: _d(loc?['lat'] ?? json['lat']),
+      longitude: _d(loc?['lng'] ?? json['lng']),
+      phone: json['phone'],
       serviceTypes: (json['services'] as List?)?.cast<String>() ?? [],
     );
   }
-  static double? _parseDouble(dynamic v) {
+
+  static double? _d(dynamic v) {
     if (v == null) return null;
     if (v is double) return v;
     if (v is int) return v.toDouble();
@@ -4340,52 +4325,51 @@ class ServiceRequestModel {
   final int? providerId;
   final String? providerName;
   final String? providerPhone;
-  final int? vehicleId;
-  final String? vehicleName;
-  final String? description;
   final String status;
   final String? serviceType;
-  final bool isScheduled;
-  final String? scheduledTime;
+  final String? vehicleName;
+  final String? description;
   final String? imageUrl;
-  final double? lat;
-  final double? lng;
   final String? address;
   final String? createdAt;
 
-  // Tracking specific fields
-  final double? providerLat;
-  final double? providerLng;
-  final String? eta;
+  // Review Data
+  final int? rating;
+  final String? reviewComment;
+  final List<String>? reviewTags;
 
   const ServiceRequestModel({
     required this.id,
     this.providerId,
     this.providerName,
     this.providerPhone,
-    this.vehicleId,
+    required this.status,
+    this.serviceType,
     this.vehicleName,
     this.description,
-    this.status = 'PENDING',
-    this.serviceType,
-    this.isScheduled = false,
-    this.scheduledTime,
     this.imageUrl,
-    this.lat,
-    this.lng,
     this.address,
     this.createdAt,
-    this.providerLat,
-    this.providerLng,
-    this.eta,
+    this.rating,
+    this.reviewComment,
+    this.reviewTags,
   });
 
   factory ServiceRequestModel.fromJson(Map<String, dynamic> json) {
     final provider = json['provider'] as Map<String, dynamic>?;
     final vehicle = json['vehicle'] as Map<String, dynamic>?;
-    final location = json['location'] as Map<String, dynamic>?;
+    final review = json['review'] as Map<String, dynamic>?;
 
-    // Build Vehicle Name safely
+    // Fix: Using 'name' from your logs
+    String? pName = provider != null
+        ? (provider['name'] ?? provider['business_name'])
+        : (json['provider_name'] ?? json['business_name']);
+
+    // Fix: Using 'phone_number' from your logs
+    String? pPhone = provider != null
+        ? (provider['phone_number'] ?? provider['phone'])
+        : json['provider_phone'];
+
     String? vName;
     if (vehicle != null) {
       final make = vehicle['make'] is Map
@@ -4398,48 +4382,34 @@ class ServiceRequestModel {
     }
 
     return ServiceRequestModel(
-      // The backend uses 'id' for details and 'request_id' for creation success
       id: json['id'] ?? json['request_id'] ?? 0,
-
-      // --- FIXED PROVIDER NAME LOGIC BASED ON YOUR DOCS ---
       providerId: provider != null ? provider['id'] : json['provider_id'],
-      providerName: provider != null
-          ? provider['business_name'] // Key from GET /requests/{id}
-          : (json['provider_name'] ??
-                json['business_name'] ??
-                'Garage'), // Key from GET /requests/
-
-      vehicleId: json['vehicle_id'],
-      vehicleName: vName ?? json['vehicle_name'],
-      description: json['description'] ?? json['issue_description'],
+      providerName: pName ?? 'Garage',
+      providerPhone: pPhone,
       status: json['status'] ?? 'PENDING',
-
       serviceType: json['service_type'] is Map
           ? json['service_type']['name']
-          : (json['service_type'] ?? json['service_type_name']),
-
-      isScheduled: json['is_scheduled'] == true,
-      scheduledTime: json['scheduled_time'],
-      imageUrl: json['photo'] ?? json['image_url'],
-
-      lat: _d(location != null ? location['lat'] : json['lat']),
-      lng: _d(location != null ? location['lng'] : json['lng']),
-      address: location != null
-          ? location['address']
-          : (json['address'] ?? json['incident_address']),
-
+          : json['service_type'],
+      vehicleName: vName ?? json['vehicle_name'],
+      description: json['description'] ?? json['issue_description'],
+      imageUrl: json['photo_url'] ?? json['photo'] ?? json['image_url'],
+      address: json['incident_address'] ?? json['address'],
       createdAt: json['created_at'],
 
-      providerLat: _d(json['provider_lat']),
-      providerLng: _d(json['provider_lng']),
-      eta: json['eta_minutes'] != null
-          ? "${json['eta_minutes']} mins"
-          : json['eta']?.toString(),
+      // Parsing Review
+      rating: _toInt(review != null ? review['rating'] : json['rating']),
+      reviewComment: review != null ? review['comment'] : json['comment'],
+      reviewTags: review != null
+          ? (review['tags'] as List?)?.cast<String>()
+          : null,
     );
   }
 
-  // Logic helpers for the UI
-  bool get canCancel => status.toUpperCase() == 'PENDING';
+  static int? _toInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    return int.tryParse(v.toString());
+  }
 
   bool get isActive => [
     'PENDING',
@@ -4449,15 +4419,6 @@ class ServiceRequestModel {
     'ARRIVED',
     'IN_PROGRESS',
   ].contains(status.toUpperCase());
-
-  // Safe parsing helper for numbers (handles int, double, and String)
-  static double? _d(dynamic v) {
-    if (v == null) return null;
-    if (v is double) return v;
-    if (v is int) return v.toDouble();
-    if (v is String) return double.tryParse(v);
-    return null;
-  }
 }
 
 
@@ -4750,6 +4711,7 @@ class _ActivityTabState extends State<ActivityTab>
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -4759,16 +4721,20 @@ class _ActivityTabState extends State<ActivityTab>
         sl<HomeRemoteSource>().getRequests(statusGroup: 'active'),
         sl<HomeRemoteSource>().getRequests(statusGroup: 'history'),
       ]);
-      setState(() {
-        _active = results[0];
-        _history = results[1];
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _active = results[0];
+          _history = results[1];
+          _loading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -4776,7 +4742,7 @@ class _ActivityTabState extends State<ActivityTab>
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Header
+        // --- Tab Header ---
         Container(
           padding: EdgeInsets.fromLTRB(
             AppDimensions.screenPadding,
@@ -4796,6 +4762,10 @@ class _ActivityTabState extends State<ActivityTab>
                 unselectedLabelColor: AppColors.textSecondary,
                 indicatorColor: AppColors.primary,
                 indicatorWeight: 3,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
                 tabs: [
                   Tab(text: 'Active (${_active.length})'),
                   Tab(text: 'History (${_history.length})'),
@@ -4804,6 +4774,8 @@ class _ActivityTabState extends State<ActivityTab>
             ],
           ),
         ),
+
+        // --- List Content ---
         Expanded(
           child: _loading
               ? const SkeletonList()
@@ -4830,8 +4802,8 @@ class _ActivityTabState extends State<ActivityTab>
         title: isHistory ? 'No past requests' : 'No active requests',
         subtitle: isHistory
             ? 'Your service history will appear here'
-            : 'Request assistance to see it here',
-        icon: isHistory ? Icons.history : Icons.hourglass_empty,
+            : 'Request assistance to see your live status here',
+        icon: isHistory ? Icons.history : Icons.hourglass_empty_outlined,
       );
     }
 
@@ -4842,26 +4814,29 @@ class _ActivityTabState extends State<ActivityTab>
         itemCount: items.length,
         itemBuilder: (_, i) {
           final r = items[i];
+
           return GestureDetector(
+            // --- THE ONTAP LOGIC YOU WERE LOOKING FOR ---
             onTap: () {
-              // --- SMART NAVIGATION LOGIC ---
               if (r.isActive) {
-                // If the request is currently in progress, go to Live Tracking
+                // ACTIVE: Go to Live Status (No map)
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => TrackingScreen(
-                      requestId: r.id,
+                      requestId: r.id, // mapped from request_id
                       garageName: r.providerName ?? 'Garage',
                     ),
                   ),
                 );
               } else {
-                // If the request is done/cancelled, go to the History Detail page
+                // COMPLETED/CANCELLED: Go to Receipt/Review page
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => RequestHistoryDetailScreen(requestId: r.id),
+                    builder: (_) => RequestHistoryDetailScreen(
+                      requestId: r.id, // mapped from request_id
+                    ),
                   ),
                 );
               }
@@ -4882,6 +4857,7 @@ class _ActivityTabState extends State<ActivityTab>
               ),
               child: Row(
                 children: [
+                  // Icon
                   Container(
                     width: 48,
                     height: 48,
@@ -4892,10 +4868,11 @@ class _ActivityTabState extends State<ActivityTab>
                     child: const Icon(
                       Icons.build_outlined,
                       color: AppColors.primary,
-                      size: 24,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // Details
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4903,22 +4880,23 @@ class _ActivityTabState extends State<ActivityTab>
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              r.providerName ??
-                                  'Garage', // This now correctly pulls "Haile Auto" instead of personal name
-                              style: AppTextStyles.bodyMedium.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textPrimary,
+                            Flexible(
+                              child: Text(
+                                r.providerName ?? 'Garage',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                             StatusBadge.fromRequestStatus(r.status),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          r.serviceType ?? r.description ?? 'General Service',
+                          r.serviceType ?? 'Automotive Service',
                           style: AppTextStyles.bodySmall,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -5750,14 +5728,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 ════════════════════════════════════════════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../../core/config/app_config.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_text_styles.dart';
-import '../../../../core/theme/app_dimensions.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
 import '../../../../core/widgets/error_view.dart';
@@ -5775,102 +5750,93 @@ class ExploreScreen extends StatefulWidget {
 
 class _ExploreScreenState extends State<ExploreScreen> {
   List<ProviderModel> _providers = [];
+  List<Map<String, dynamic>> _serviceTypes = [];
   bool _loading = true;
+  bool _loadingMore = false;
   String? _error;
 
-  // Filter States
+  int _currentLimit = 10;
   bool _onlineOnly = false;
   int? _selectedServiceType;
-  String _sortBy = 'distance';
+  double? _radius = 20.0;
+  final TextEditingController _searchCtrl = TextEditingController();
 
-  LatLng _position = const LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
-  List<Map<String, dynamic>> _serviceTypes = [];
-  bool _showMap = false;
+  LatLng _position = const LatLng(9.02497, 38.74689);
 
   @override
   void initState() {
     super.initState();
     _selectedServiceType = widget.preFilterServiceTypeId;
+    _loadServiceTypes();
     _init();
   }
 
   Future<void> _init() async {
     try {
-      // 1. Instant check for last location
       Position? lastPos = await Geolocator.getLastKnownPosition();
       if (lastPos != null) {
         _position = LatLng(lastPos.latitude, lastPos.longitude);
       }
+      _search();
 
-      // 2. Refresh location with a strict 4-second timeout to avoid infinite loading
-      final pos = await Geolocator.getCurrentPosition(
+      Position currentPos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.low,
-        timeLimit: const Duration(seconds: 4),
+        timeLimit: const Duration(seconds: 3),
       );
-      _position = LatLng(pos.latitude, pos.longitude);
-    } catch (e) {
-      debugPrint("Location fallback used: $e");
+      _position = LatLng(currentPos.latitude, currentPos.longitude);
+      _search();
+    } catch (_) {
+      _search();
     }
-
-    _loadServiceTypes();
-    _search();
   }
 
   Future<void> _loadServiceTypes() async {
     try {
-      final types = await sl<HomeRemoteSource>().getServiceTypes();
-      if (mounted) setState(() => _serviceTypes = types);
+      _serviceTypes = await sl<HomeRemoteSource>().getServiceTypes();
+      if (mounted) setState(() {});
     } catch (_) {}
   }
 
-  Future<void> _search() async {
+  Future<void> _search({bool isLoadMore = false}) async {
     if (!mounted) return;
     setState(() {
-      _loading = true;
+      if (isLoadMore)
+        _loadingMore = true;
+      else
+        _loading = true;
       _error = null;
     });
 
     try {
-      final providers = await sl<HomeRemoteSource>()
-          .getNearbyProviders(
-            lat: _position.latitude,
-            lng: _position.longitude,
-            radiusKm: 500.0,
-            isOnline: _onlineOnly ? true : null,
-            serviceTypeId: _selectedServiceType,
-            sortBy: _sortBy,
-          )
-          .timeout(const Duration(seconds: 10)); // Prevent API hang
-
-      if (mounted) {
+      final results = await sl<HomeRemoteSource>().getNearbyProviders(
+        lat: _position.latitude,
+        lng: _position.longitude,
+        radiusKm: _radius,
+        isOnline: _onlineOnly ? true : null,
+        serviceTypeId: _selectedServiceType,
+        limit: _currentLimit,
+      );
+      if (mounted)
         setState(() {
-          _providers = providers;
+          _providers = results;
           _loading = false;
+          _loadingMore = false;
         });
-      }
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         setState(() {
-          _error = "Connection timeout. Tap to retry.";
           _loading = false;
+          _loadingMore = false;
+          _error = "Connection slow. Tap to retry.";
         });
-      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Explore Garages'),
-        actions: [
-          IconButton(
-            icon: Icon(_showMap ? Icons.list_outlined : Icons.map_outlined),
-            onPressed: () => setState(() => _showMap = !_showMap),
-          ),
-        ],
-      ),
+      backgroundColor: Colors.white,
+      appBar: AppBar(title: const Text('Explore Garages'), elevation: 0),
       body: Column(
         children: [
           _buildFilters(),
@@ -5879,14 +5845,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ? const SkeletonList()
                 : _error != null
                 ? ErrorView(message: _error!, onRetry: _search)
-                : _providers.isEmpty
-                ? const EmptyView(
-                    title: 'No garages found',
-                    subtitle: 'Try changing your filters',
-                    icon: Icons.search_off_outlined,
-                  )
-                : _showMap
-                ? _buildMapView()
                 : _buildListView(),
           ),
         ],
@@ -5894,228 +5852,171 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
-  // --- REFINED CLEAN FILTERS ---
   Widget _buildFilters() {
     return Container(
-      color: AppColors.surface,
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      color: Colors.white,
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         children: [
-          // ROW 1: Toggles and Sorting
           Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: "Search garages...",
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: Colors.grey.shade100,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: EdgeInsets.zero,
+              ),
+              onSubmitted: (_) {
+                setState(() => _currentLimit = 10);
+                _search();
+              },
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
                 FilterChip(
-                  label: const Text('Online Now'),
+                  label: const Text('Online'),
                   selected: _onlineOnly,
                   onSelected: (v) {
-                    setState(() => _onlineOnly = v);
+                    setState(() {
+                      _onlineOnly = v;
+                      _currentLimit = 10;
+                    });
                     _search();
                   },
                   selectedColor: AppColors.primary,
                   labelStyle: TextStyle(
                     color: _onlineOnly ? Colors.white : Colors.black,
                     fontSize: 12,
-                    fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(width: 12),
-                // Custom Sort Dropdown
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: DropdownButton<String>(
-                    value: _sortBy,
-                    isDense: true,
-                    underline: const SizedBox(),
-                    icon: const Icon(Icons.keyboard_arrow_down, size: 18),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'distance',
-                        child: Text('Nearest'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'rating',
-                        child: Text('Top Rated'),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() => _sortBy = v);
+                const SizedBox(width: 8),
+                DropdownButton<double?>(
+                  value: _radius,
+                  underline: const SizedBox(),
+                  style: const TextStyle(fontSize: 12, color: Colors.black),
+                  items: const [
+                    DropdownMenuItem(value: 5.0, child: Text("5 km")),
+                    DropdownMenuItem(value: 20.0, child: Text("20 km")),
+                    DropdownMenuItem(value: 100.0, child: Text("100 km")),
+                  ],
+                  onChanged: (v) {
+                    setState(() {
+                      _radius = v;
+                      _currentLimit = 10;
+                    });
+                    _search();
+                  },
+                ),
+                const SizedBox(width: 8),
+                ..._serviceTypes.map(
+                  (type) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(type['name'] ?? ''),
+                      selected: _selectedServiceType == type['id'],
+                      onSelected: (v) {
+                        setState(() {
+                          _selectedServiceType = v ? type['id'] : null;
+                          _currentLimit = 10;
+                        });
                         _search();
-                      }
-                    },
+                      },
+                      selectedColor: AppColors.primary,
+                      labelStyle: TextStyle(
+                        color: _selectedServiceType == type['id']
+                            ? Colors.white
+                            : Colors.black,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-
-          const SizedBox(height: 12),
-
-          // ROW 2: Service Categories (Scrollable)
-          if (_serviceTypes.isNotEmpty)
-            SizedBox(
-              height: 38,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: _serviceTypes.length + 1,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final isAll = i == 0;
-                  final id = isAll ? null : _serviceTypes[i - 1]['id'];
-                  final name = isAll
-                      ? 'All Services'
-                      : _serviceTypes[i - 1]['name'];
-                  final isSelected = _selectedServiceType == id;
-
-                  return ChoiceChip(
-                    label: Text(name),
-                    selected: isSelected,
-                    onSelected: (_) {
-                      setState(() => _selectedServiceType = id);
-                      _search();
-                    },
-                    labelStyle: TextStyle(
-                      fontSize: 11,
-                      color: isSelected ? Colors.white : Colors.black87,
-                    ),
-                    selectedColor: AppColors.primary,
-                    backgroundColor: Colors.white,
-                    side: BorderSide(
-                      color: isSelected
-                          ? AppColors.primary
-                          : Colors.grey.shade300,
-                    ),
-                  );
-                },
-              ),
-            ),
         ],
       ),
     );
   }
 
   Widget _buildListView() {
+    if (_providers.isEmpty) return const EmptyView(title: 'No garages found');
     return RefreshIndicator(
-      onRefresh: _search,
+      onRefresh: () async {
+        setState(() => _currentLimit = 10);
+        await _search();
+      },
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: _providers.length,
-        itemBuilder: (_, i) => _ProviderCard(
-          provider: _providers[i],
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => GarageProfileScreen(provider: _providers[i]),
+        itemCount: _providers.length + 1,
+        itemBuilder: (context, i) {
+          if (i == _providers.length) {
+            return _providers.length >= _currentLimit
+                ? Center(
+                    child: _loadingMore
+                        ? const CircularProgressIndicator()
+                        : TextButton(
+                            onPressed: () {
+                              setState(() => _currentLimit += 10);
+                              _search(isLoadMore: true);
+                            },
+                            child: const Text(
+                              "See More Garages",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                  )
+                : const SizedBox(height: 80);
+          }
+          final p = _providers[i];
+          return Card(
+            elevation: 0,
+            margin: const EdgeInsets.only(bottom: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.grey.shade200),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMapView() {
-    return FlutterMap(
-      options: MapOptions(initialCenter: _position, initialZoom: 13),
-      children: [
-        TileLayer(
-          urlTemplate: AppConfig.mapTileUrl,
-          userAgentPackageName: AppConfig.mapUserAgent,
-        ),
-        MarkerLayer(
-          markers: _providers.where((p) => p.latitude != null).map((p) {
-            return Marker(
-              point: LatLng(p.latitude!, p.longitude!),
-              width: 40,
-              height: 40,
-              child: const Icon(
-                Icons.location_on,
-                color: AppColors.primary,
-                size: 35,
+            child: ListTile(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => GarageProfileScreen(provider: p),
+                ),
               ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-}
-
-class _ProviderCard extends StatelessWidget {
-  final ProviderModel provider;
-  final VoidCallback onTap;
-  const _ProviderCard({required this.provider, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      child: ListTile(
-        onTap: onTap,
-        contentPadding: const EdgeInsets.all(12),
-        leading: Container(
-          width: 50,
-          height: 50,
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(Icons.store_outlined, color: AppColors.primary),
-        ),
-        title: Text(
-          provider.businessName,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                const Icon(Icons.star, color: AppColors.warning, size: 14),
-                const SizedBox(width: 4),
-                Text(
-                  provider.rating?.toStringAsFixed(1) ?? '0.0',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+              leading: Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(width: 12),
-                const Icon(
-                  Icons.location_on_outlined,
-                  color: Colors.grey,
-                  size: 14,
+                child: const Icon(
+                  Icons.store_outlined,
+                  color: AppColors.primary,
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  "${provider.distanceKm?.toStringAsFixed(1) ?? '?'} km",
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
+              ),
+              title: Text(
+                p.businessName,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text(
+                "${p.rating?.toStringAsFixed(1) ?? '0.0'} ★ • ${p.distanceKm?.toStringAsFixed(1) ?? '?'} km",
+              ),
+              trailing: StatusBadge.online(p.isOnline),
             ),
-          ],
-        ),
-        trailing: StatusBadge.online(provider.isOnline),
+          );
+        },
       ),
     );
   }
@@ -6127,7 +6028,6 @@ class _ProviderCard extends StatelessWidget {
 ════════════════════════════════════════════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // Add this for date formatting
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -6151,15 +6051,10 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
   late TabController _tabController;
   ProviderModel? _detail;
   bool _loadingDetail = true;
-
-  // Data for dynamic tabs
   List<Map<String, dynamic>> _spareParts = [];
   bool _loadingParts = false;
-
   List<Map<String, dynamic>> _reviews = [];
   bool _loadingReviews = false;
-
-  bool _isFavorite = false;
 
   @override
   void initState() {
@@ -6176,22 +6071,19 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
     super.dispose();
   }
 
-  // TRIGGER BACKEND CALLS WHEN TABS ARE CLICKED
   void _handleTabChange() {
     if (_tabController.indexIsChanging) return;
-
-    if (_tabController.index == 1 && _spareParts.isEmpty) {
+    if (_tabController.index == 1 && _spareParts.isEmpty)
       _loadSpareParts();
-    } else if (_tabController.index == 2 && _reviews.isEmpty) {
+    else if (_tabController.index == 2 && _reviews.isEmpty)
       _loadReviews();
-    }
   }
 
   Future<void> _loadDetail() async {
     try {
-      final detail = await sl<HomeRemoteSource>()
-          .getProviderDetail(widget.provider.id)
-          .timeout(const Duration(seconds: 8));
+      final detail = await sl<HomeRemoteSource>().getProviderDetail(
+        widget.provider.id,
+      );
       if (mounted)
         setState(() {
           _detail = detail;
@@ -6225,7 +6117,6 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
   Future<void> _loadReviews() async {
     setState(() => _loadingReviews = true);
     try {
-      // Calls the new method we added to the DataSource
       final reviews = await sl<HomeRemoteSource>().getProviderReviews(
         widget.provider.id,
       );
@@ -6239,71 +6130,27 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
     }
   }
 
-  Future<void> _toggleFavorite() async {
-    try {
-      if (_isFavorite) {
-        await sl<HomeRemoteSource>().removeFavorite(widget.provider.id);
-      } else {
-        await sl<HomeRemoteSource>().addFavorite(widget.provider.id);
-      }
-      setState(() => _isFavorite = !_isFavorite);
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final p = _detail ?? widget.provider;
-
     return Scaffold(
-      backgroundColor: const Color(0xFF6B7280),
+      // FIX: Changed background to White to remove grey gap
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
           CustomScrollView(
             slivers: [
-              // --- Header Section ---
               SliverAppBar(
-                expandedHeight: 220,
+                expandedHeight: 180,
                 pinned: true,
-                backgroundColor: Colors.transparent,
+                // Maintain grey header look
+                backgroundColor: const Color(0xFF6B7280),
                 elevation: 0,
                 leading: _buildCircleAction(
                   Icons.arrow_back,
                   () => Navigator.pop(context),
                 ),
-                actions: [
-                  _buildCircleAction(
-                    _isFavorite ? Icons.favorite : Icons.favorite_border,
-                    _toggleFavorite,
-                    color: _isFavorite ? AppColors.error : Colors.black,
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                flexibleSpace: FlexibleSpaceBar(
-                  background: Center(
-                    child: Container(
-                      width: 90,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white24, width: 2),
-                      ),
-                      child: const Icon(
-                        Icons.store_outlined,
-                        color: Colors.white,
-                        size: 44,
-                      ),
-                    ),
-                  ),
-                ),
               ),
-
-              // --- Main Card ---
               SliverToBoxAdapter(
                 child: Container(
                   decoration: const BoxDecoration(
@@ -6333,23 +6180,7 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.location_on,
-                            color: AppColors.primary,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            p.address ?? "Bole, Addis Ababa",
-                            style: AppTextStyles.bodySmall,
-                          ),
-                        ],
-                      ),
                       const SizedBox(height: 24),
-
                       TabBar(
                         controller: _tabController,
                         isScrollable: true,
@@ -6357,10 +6188,6 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
                         indicatorColor: AppColors.actionOrange,
                         labelColor: AppColors.actionOrange,
                         unselectedLabelColor: Colors.grey,
-                        labelStyle: AppTextStyles.label.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        dividerColor: Colors.transparent,
                         tabs: const [
                           Tab(text: "Services"),
                           Tab(text: "Spare Parts"),
@@ -6369,8 +6196,6 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
                         ],
                       ),
                       const SizedBox(height: 24),
-
-                      // AnimatedBuilder makes sure the content UI refreshes when _tabController changes
                       AnimatedBuilder(
                         animation: _tabController,
                         builder: (context, _) => _buildTabContent(p),
@@ -6381,14 +6206,12 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
               ),
             ],
           ),
-
-          // --- Bottom Buttons (Fixed Overflow) ---
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: Colors.white,
                 boxShadow: [
@@ -6401,33 +6224,14 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
               ),
               child: SafeArea(
                 top: false,
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: AppButton(
-                        label: 'Call',
-                        variant: AppButtonVariant.secondary,
-                        icon: Icons.phone_outlined,
-                        onPressed: () {},
-                      ),
+                child: AppButton(
+                  label: 'Request Service',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => RequestDetailsScreen(provider: p),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 4,
-                      child: AppButton(
-                        label: 'Request Service',
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => RequestDetailsScreen(provider: p),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -6440,215 +6244,119 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
   Widget _buildTabContent(ProviderModel p) {
     switch (_tabController.index) {
       case 0:
-        return _buildServicesView(p);
+        return Column(
+          children: [
+            _buildPriceItem(
+              "General Repair",
+              "Varies by issue",
+              "Check with garage",
+            ),
+          ],
+        );
       case 1:
-        return _buildSparePartsView();
+        return _loadingParts
+            ? const Center(child: CircularProgressIndicator())
+            : _spareParts.isEmpty
+            ? const EmptyView(title: "No parts listed")
+            : Column(
+                children: _spareParts
+                    .map(
+                      (part) => _buildPriceItem(
+                        part['name'] ?? 'Part',
+                        part['category'] ?? 'Spare',
+                        "${part['price'] ?? '0'} ETB",
+                      ),
+                    )
+                    .toList(),
+              );
       case 2:
         return _buildReviewsView(p);
       case 3:
-        return _buildInfoView(p);
+        return Column(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.phone),
+              title: Text(p.phone ?? 'Not provided'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ],
+        );
       default:
         return const SizedBox();
     }
   }
 
-  Widget _buildServicesView(ProviderModel p) {
-    // If backend doesn't provide prices, show defaults
-    return Column(
-      children: [
-        _buildPriceItem("Oil Change", "Includes filter & labor", "1,500 ETB"),
-        _buildPriceItem("Diagnostics", "Full system scan", "500 ETB"),
-        _buildPriceItem("Brake Repair", "Labor only", "800 ETB"),
-        _buildPriceItem("Engine Tune-up", "Spark plugs & filter", "2,000 ETB"),
-      ],
-    );
-  }
-
-  Widget _buildSparePartsView() {
-    if (_loadingParts)
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(30),
-          child: CircularProgressIndicator(),
-        ),
-      );
-    if (_spareParts.isEmpty)
-      return const EmptyView(
-        title: "No spare parts",
-        subtitle: "This garage hasn't uploaded inventory.",
-      );
-    return Column(
-      children: _spareParts
-          .map(
-            (part) => _buildPriceItem(
-              part['name'] ?? 'Part',
-              part['category'] ?? 'Spare Part',
-              "${part['price'] ?? '0'} ETB",
-            ),
-          )
-          .toList(),
-    );
-  }
-
   Widget _buildReviewsView(ProviderModel p) {
     if (_loadingReviews)
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(30),
-          child: CircularProgressIndicator(),
-        ),
-      );
-
+      return const Center(child: CircularProgressIndicator());
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            // Use Expanded for the title so the button has a fixed width
-            Expanded(
-              child: Text("User Reviews", style: AppTextStyles.sectionHeader),
-            ),
-            const SizedBox(width: 8),
-            AppButton(
-              label: "Rate Now",
-              size: AppButtonSize.small,
-              width: 95, // Set a specific width that fits your screen
-              onPressed: () => _showWriteReviewDialog(p.id),
+            const Icon(Icons.star, color: AppColors.warning, size: 40),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "${p.rating?.toStringAsFixed(1) ?? '0.0'}/5.0",
+                  style: AppTextStyles.h2,
+                ),
+                Text(
+                  "Based on ${p.reviewCount ?? 0} ratings",
+                  style: AppTextStyles.caption,
+                ),
+              ],
             ),
           ],
         ),
-        const Divider(height: 32),
-        if (_loadingReviews)
-          const Center(child: CircularProgressIndicator())
-        else if (_reviews.isEmpty)
-          const Center(child: Text("No reviews yet."))
+        const Divider(height: 40),
+        if (_reviews.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Text("No detailed reviews yet."),
+            ),
+          )
         else
           ..._reviews.map((rev) => _buildReviewItem(rev)),
       ],
     );
   }
 
-  // POP-UP DIALOG FOR WRITING A REVIEW
-  void _showWriteReviewDialog(int providerId) {
-    int selectedRating = 5;
-    final commentController = TextEditingController();
-    bool isSubmitting = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: const Text("Rate this Garage"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // FIXED OVERFLOW: FittedBox ensures stars fit on narrow screens like Infinix
-              FittedBox(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(
-                    5,
-                    (index) => IconButton(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      constraints: const BoxConstraints(),
-                      onPressed: isSubmitting
-                          ? null
-                          : () => setDialogState(
-                              () => selectedRating = index + 1,
-                            ),
-                      icon: Icon(
-                        index < selectedRating ? Icons.star : Icons.star_border,
-                        color: AppColors.warning,
-                        size: 32,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: commentController,
-                enabled: !isSubmitting,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  hintText: "Share your experience...",
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-              ),
-              onPressed: isSubmitting
-                  ? null
-                  : () async {
-                      setDialogState(() => isSubmitting = true);
-                      try {
-                        await sl<HomeRemoteSource>().submitGarageReview(
-                          providerId: providerId,
-                          rating: selectedRating,
-                          comment: commentController.text,
-                        );
-                        if (mounted) {
-                          Navigator.pop(ctx);
-                          _loadReviews();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Review submitted!"),
-                              backgroundColor: AppColors.success,
-                            ),
-                          );
-                        }
-                      } catch (e) {
-                        setDialogState(() => isSubmitting = false);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(e.toString()),
-                            backgroundColor: AppColors.error,
-                          ),
-                        );
-                      }
-                    },
-              child: isSubmitting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Text("Submit", style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildReviewItem(Map<String, dynamic> rev) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade100),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              CircleAvatar(
+                radius: 14,
+                backgroundColor: AppColors.primary.withOpacity(0.1),
+                child: Text(
+                  (rev['user_name'] ?? 'U')[0].toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               Text(
-                rev['user_name'] ?? 'User',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                rev['user_name'] ?? 'Verified User',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
               ),
               const Spacer(),
               Row(
@@ -6665,115 +6373,75 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(rev['comment'] ?? '', style: AppTextStyles.bodySmall),
-          const SizedBox(height: 4),
-          if (rev['created_at'] != null)
-            Text(
-              rev['created_at'].toString().substring(0, 10),
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+          const SizedBox(height: 8),
+          Text(
+            rev['comment'] ?? 'No comment.',
+            style: AppTextStyles.bodySmall.copyWith(
+              color: Colors.black87,
+              height: 1.4,
             ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildInfoView(ProviderModel p) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildCircleAction(IconData icon, VoidCallback onTap) => Padding(
+    padding: const EdgeInsets.all(8),
+    child: CircleAvatar(
+      backgroundColor: Colors.white,
+      child: IconButton(
+        icon: Icon(icon, color: Colors.black, size: 20),
+        onPressed: onTap,
+      ),
+    ),
+  );
+
+  Widget _buildBadge(IconData icon, String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Row(
       children: [
-        const Text(
-          "Contact Info",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        ListTile(
-          leading: const Icon(Icons.phone, size: 18),
-          title: Text(p.phone ?? 'Not provided'),
-          contentPadding: EdgeInsets.zero,
-        ),
-        ListTile(
-          leading: const Icon(Icons.access_time, size: 18),
-          title: const Text('Open 8:00 AM - 6:00 PM'),
-          contentPadding: EdgeInsets.zero,
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
         ),
       ],
-    );
-  }
+    ),
+  );
 
-  // UI Reusable Helpers
-  Widget _buildCircleAction(
-    IconData icon,
-    VoidCallback onTap, {
-    Color color = Colors.black,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: CircleAvatar(
-        backgroundColor: Colors.white,
-        child: IconButton(
-          icon: Icon(icon, color: color, size: 20),
-          onPressed: onTap,
+  Widget _buildPriceItem(String t, String d, String p) => Padding(
+    padding: const EdgeInsets.only(bottom: 20),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(t, style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(d, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+            ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildBadge(IconData icon, String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+        Text(
+          p,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPriceItem(String title, String desc, String price) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  desc,
-                  style: const TextStyle(color: Colors.grey, fontSize: 13),
-                ),
-              ],
-            ),
-          ),
-          Text(
-            price,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: AppColors.primary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
 
 
@@ -8222,7 +7890,6 @@ import 'package:flutter/material.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../../../core/theme/app_dimensions.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../data/datasources/home_remote_source.dart';
@@ -8241,21 +7908,10 @@ class _RequestHistoryDetailScreenState
     extends State<RequestHistoryDetailScreen> {
   ServiceRequestModel? _request;
   bool _loading = true;
-
-  // Review Form State
   int _rating = 0;
   final _commentCtrl = TextEditingController();
   final List<String> _selectedTags = [];
   bool _submittingReview = false;
-
-  // Available tags from backend documentation
-  final List<String> _availableTags = [
-    'fast_service',
-    'professional',
-    'friendly',
-    'fair_price',
-    'expert',
-  ];
 
   @override
   void initState() {
@@ -8275,46 +7931,6 @@ class _RequestHistoryDetailScreenState
     }
   }
 
-  Future<void> _submitReview() async {
-    if (_rating == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a star rating')),
-      );
-      return;
-    }
-
-    setState(() => _submittingReview = true);
-    try {
-      await sl<HomeRemoteSource>().submitReview(
-        requestId: widget.requestId, // Fixes the red squiggle
-        rating: _rating,
-        comment: _commentCtrl.text.trim(),
-        tags: _selectedTags,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Thank you for your review!'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-        Navigator.pop(context); // Return to activity list
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString()),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _submittingReview = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -8323,18 +7939,18 @@ class _RequestHistoryDetailScreenState
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _request == null
-          ? const Center(child: Text('Request details not found'))
+          ? const Center(child: Text('Request not found'))
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(AppDimensions.screenPadding),
+              padding: const EdgeInsets.all(16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildSummaryCard(),
-
-                  // ONLY SHOW REVIEW SECTION IF COMPLETED
                   if (_request!.status.toUpperCase() == 'COMPLETED') ...[
                     const SizedBox(height: 24),
-                    _buildReviewSection(),
+                    // Check if rating exists to show "Your Feedback"
+                    (_request!.rating != null && _request!.rating! > 0)
+                        ? _buildExistingReview()
+                        : _buildReviewForm(),
                   ],
                 ],
               ),
@@ -8344,33 +7960,29 @@ class _RequestHistoryDetailScreenState
 
   Widget _buildSummaryCard() {
     return Container(
-      padding: const EdgeInsets.all(AppDimensions.cardPadding),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
-        boxShadow: const [
-          BoxShadow(color: AppColors.cardShadow, blurRadius: 10),
-        ],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
                 child: Text(
-                  _request!.providerName ?? 'Garage', // Changed to match
+                  _request!.providerName ?? 'Garage',
                   style: AppTextStyles.h3,
                 ),
               ),
               StatusBadge.fromRequestStatus(_request!.status),
             ],
           ),
-          const Divider(height: 24),
-          _infoRow('Service', _request!.serviceType ?? 'General Repair'),
-          _infoRow('Vehicle', _request!.vehicleName ?? 'My Vehicle'),
-          _infoRow('Date', _request!.createdAt?.substring(0, 10) ?? 'N/A'),
+          const Divider(height: 32),
+          _infoRow('Service', _request!.serviceType ?? 'General'),
+          _infoRow('Vehicle', _request!.vehicleName ?? 'Vehicle'),
+          _infoRow('Date', _request!.createdAt?.substring(0, 10) ?? ''),
           if (_request!.description != null)
             _infoRow('Issue', _request!.description!),
         ],
@@ -8378,7 +7990,49 @@ class _RequestHistoryDetailScreenState
     );
   }
 
-  Widget _buildReviewSection() {
+  Widget _buildExistingReview() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.green.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Your Feedback",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              Row(
+                children: List.generate(
+                  5,
+                  (i) => Icon(
+                    Icons.star,
+                    size: 18,
+                    color: i < (_request!.rating ?? 0)
+                        ? Colors.orange
+                        : Colors.grey[200],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _request!.reviewComment ?? "No written comment was provided.",
+            style: const TextStyle(fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewForm() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -8386,60 +8040,37 @@ class _RequestHistoryDetailScreenState
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             "Rate your experience",
-            style: TextStyle(fontWeight: FontWeight.bold),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
-          const SizedBox(height: 16),
-          // Stars Row
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(
               5,
-              (index) => IconButton(
-                onPressed: () => setState(() => _rating = index + 1),
+              (i) => IconButton(
+                onPressed: () => setState(() => _rating = i + 1),
                 icon: Icon(
-                  index < _rating ? Icons.star : Icons.star_border,
-                  color: AppColors.warning,
-                  size: 30,
+                  i < _rating ? Icons.star : Icons.star_border,
+                  color: Colors.orange,
+                  size: 36,
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          // Tags (Documentation mentions: fast_service, professional, friendly)
-          Wrap(
-            spacing: 8,
-            children: ['fast_service', 'professional', 'friendly'].map((tag) {
-              final isSelected = _selectedTags.contains(tag);
-              return ChoiceChip(
-                label: Text(
-                  tag.replaceAll('_', ' '),
-                  style: const TextStyle(fontSize: 11),
-                ),
-                selected: isSelected,
-                onSelected: (val) {
-                  setState(
-                    () => val
-                        ? _selectedTags.add(tag)
-                        : _selectedTags.remove(tag),
-                  );
-                },
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           TextField(
             controller: _commentCtrl,
-            decoration: const InputDecoration(
-              hintText: "Add a comment...",
-              border: OutlineInputBorder(),
-            ),
             maxLines: 2,
+            decoration: InputDecoration(
+              hintText: "Add a comment...",
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           AppButton(
             label: "Submit Review",
             isLoading: _submittingReview,
@@ -8453,18 +8084,9 @@ class _RequestHistoryDetailScreenState
                   tags: _selectedTags,
                   comment: _commentCtrl.text,
                 );
-                Navigator.pop(context);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text("Thank you!")));
+                _load();
               } catch (e) {
                 setState(() => _submittingReview = false);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(e.toString()),
-                    backgroundColor: AppColors.error,
-                  ),
-                );
               }
             },
           ),
@@ -8473,18 +8095,22 @@ class _RequestHistoryDetailScreenState
     );
   }
 
-  Widget _infoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 80, child: Text(label, style: AppTextStyles.caption)),
-          Expanded(child: Text(value, style: AppTextStyles.bodyMedium)),
-        ],
-      ),
-    );
-  }
+  Widget _infoRow(String l, String v) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            l,
+            style: const TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+        ),
+        Expanded(child: Text(v, style: const TextStyle(fontSize: 14))),
+      ],
+    ),
+  );
 }
 
 
@@ -8525,7 +8151,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
   @override
   void initState() {
     super.initState();
+    // 1. Initial immediate poll
     _poll();
+    // 2. Start periodic polling (every 8 seconds per your config)
     _timer = Timer.periodic(AppConfig.trackingPollInterval, (_) => _poll());
   }
 
@@ -8540,118 +8168,181 @@ class _TrackingScreenState extends State<TrackingScreen> {
       final response = await sl<HomeRemoteSource>().getRequestTracking(
         widget.requestId,
       );
+
       if (mounted) {
         setState(() {
-          _status = response['status'] ?? _status;
-          if (response['eta_minutes'] != null)
+          // Update status - Ensure we handle case where status might be null
+          _status = response['status']?.toString().toUpperCase() ?? _status;
+
+          // Update ETA
+          if (response['eta_minutes'] != null) {
             _eta = "${response['eta_minutes']} mins";
+          } else if (response['eta'] != null) {
+            _eta = response['eta'].toString();
+          }
+
           _loading = false;
         });
-        if (['COMPLETED', 'CANCELLED'].contains(_status.toUpperCase()))
+
+        // Stop polling only if it reaches a terminal state
+        if (['COMPLETED', 'CANCELLED', 'REJECTED'].contains(_status)) {
           _timer?.cancel();
+          debugPrint("Polling stopped: Terminal state $_status reached.");
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("Tracking Poll Error: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(title: const Text('Live Status'), elevation: 0),
+      appBar: AppBar(
+        title: const Text('Live Status'),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+      ),
       body: Column(
         children: [
           const Spacer(),
-          // LARGE STATUS ICON (Replaced the Map)
+          // LARGE STATUS ICON
           Container(
-            width: 140,
-            height: 140,
+            width: 160,
+            height: 160,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
+              color: AppColors.primary.withOpacity(0.08),
               shape: BoxShape.circle,
             ),
-            child: Icon(_statusIcon, color: AppColors.primary, size: 70),
+            child: Icon(_statusIcon, color: AppColors.primary, size: 80),
           ),
           const SizedBox(height: 32),
-          Text(
-            _statusMessage,
-            style: AppTextStyles.h2,
-            textAlign: TextAlign.center,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              _statusMessage,
+              style: AppTextStyles.h2,
+              textAlign: TextAlign.center,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           StatusBadge.fromRequestStatus(_status),
 
-          if (_eta != null && _status.toUpperCase() == 'EN_ROUTE') ...[
+          // Show ETA only during transit
+          if (_eta != null &&
+              (_status == 'EN_ROUTE' ||
+                  _status == 'ON_THE_WAY' ||
+                  _status == 'ACCEPTED')) ...[
             const SizedBox(height: 40),
             Text("Estimated Arrival", style: AppTextStyles.caption),
+            const SizedBox(height: 4),
             Text(
               _eta!,
-              style: AppTextStyles.h1.copyWith(color: AppColors.actionOrange),
+              style: AppTextStyles.h1.copyWith(
+                color: AppColors.actionOrange,
+                fontSize: 36,
+              ),
             ),
           ],
           const Spacer(),
 
-          // INFO CARD
-          Container(
-            padding: const EdgeInsets.all(24),
-            margin: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.inputFill,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.store_outlined,
-                  color: AppColors.primary,
-                  size: 28,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.garageName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const Text(
-                        "Service Provider",
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                AppIconButton(icon: Icons.phone, onPressed: () {}),
-              ],
-            ),
-          ),
+          // PROVIDER INFO CARD
+          _buildInfoCard(),
           const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  String get _statusMessage => switch (_status.toUpperCase()) {
-    'PENDING' => 'Waiting for the garage to accept...',
-    'ACCEPTED' => 'Request Accepted!',
-    'EN_ROUTE' || 'ON_THE_WAY' => 'Provider is on the way!',
-    'ARRIVED' => 'Provider has arrived!',
-    'IN_PROGRESS' => 'Fixing your vehicle...',
-    'COMPLETED' => 'Service Completed!',
-    _ => 'Connecting...',
+  Widget _buildInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      margin: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.store_outlined,
+              color: AppColors.primary,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.garageName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const Text(
+                  "Service Provider",
+                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          // Call button
+          CircleAvatar(
+            backgroundColor: Colors.green.shade50,
+            child: IconButton(
+              icon: const Icon(Icons.phone, color: Colors.green, size: 20),
+              onPressed: () {
+                // Future: Integration with url_launcher to call provider
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- LOGIC MAPPING BASED ON BACKEND DOCS ---
+
+  String get _statusMessage => switch (_status) {
+    'PENDING' => 'Waiting for the garage to accept your request...',
+    'ACCEPTED' => 'The garage has accepted! Preparing tools...',
+    'EN_ROUTE' ||
+    'ON_THE_WAY' => 'The mechanic is currently on the way to you.',
+    'ARRIVED' => 'The mechanic has arrived at your location.',
+    'IN_PROGRESS' => 'Work is underway. Fixing your vehicle...',
+    'COMPLETED' => 'Service finished! Please proceed to payment.',
+    'CANCELLED' => 'This request was cancelled.',
+    'REJECTED' => 'The garage could not fulfill this request.',
+    _ => 'Updating status...',
   };
 
-  IconData get _statusIcon => switch (_status.toUpperCase()) {
-    'PENDING' => Icons.hourglass_top,
-    'ACCEPTED' => Icons.check_circle_outline,
-    'EN_ROUTE' => Icons.local_shipping,
-    'ARRIVED' => Icons.location_on,
-    'IN_PROGRESS' => Icons.build,
-    'COMPLETED' => Icons.verified,
+  IconData get _statusIcon => switch (_status) {
+    'PENDING' => Icons.hourglass_top_rounded,
+    'ACCEPTED' => Icons.assignment_turned_in_outlined,
+    'EN_ROUTE' || 'ON_THE_WAY' => Icons.local_shipping_outlined,
+    'ARRIVED' => Icons.location_on_rounded,
+    'IN_PROGRESS' => Icons.build_circle_outlined,
+    'COMPLETED' => Icons.check_circle_rounded,
+    'CANCELLED' || 'REJECTED' => Icons.cancel_outlined,
     _ => Icons.sync,
   };
 }

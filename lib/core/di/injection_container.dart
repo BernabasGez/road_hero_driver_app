@@ -1,5 +1,6 @@
 import 'package:get_it/get_it.dart';
 import 'package:dio/dio.dart';
+import 'package:road_hero/features/home/presentation/bloc/cart_cubit.dart';
 import '../api/dio_client.dart';
 import '../../features/auth/data/datasources/auth_remote_source.dart';
 import '../../features/auth/data/repositories/auth_repository_impl.dart';
@@ -25,4 +26,5 @@ Future<void> initDependencies() async {
   // ─── Home ──────────────────────────────────
   sl.registerLazySingleton(() => HomeRemoteSource(sl<Dio>()));
   sl.registerFactory(() => HomeCubit(sl<HomeRemoteSource>()));
+  sl.registerLazySingleton(() => CartCubit()); // Added this line
 }

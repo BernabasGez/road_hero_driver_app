@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../../../core/theme/app_colors.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:road_hero/features/home/presentation/bloc/cart_cubit.dart';
+import 'package:road_hero/core/widgets/app_button.dart'; // REQUIRED IMPORT
+import 'package:road_hero/core/theme/app_colors.dart';
 import 'home_tab.dart';
 import 'explore_screen.dart';
 import 'activity_tab.dart';
@@ -16,11 +19,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  // lib/features/home/presentation/screens/home_screen.dart
-
   @override
   Widget build(BuildContext context) {
-    // We removed the BlocProvider from here because it's now in main.dart
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
@@ -36,6 +36,23 @@ class _HomeScreenState extends State<HomeScreen> {
           const ActivityTab(),
           const ProfileTab(),
         ],
+      ),
+      floatingActionButton: BlocBuilder<CartCubit, CartState>(
+        builder: (context, state) {
+          if (state.items.isEmpty) return const SizedBox.shrink();
+          return FloatingActionButton.extended(
+            onPressed: () => _showCartSummary(context, state),
+            backgroundColor: AppColors.actionOrange,
+            icon: const Icon(Icons.shopping_cart, color: Colors.white),
+            label: Text(
+              "Cart: ${state.totalCartPrice.toStringAsFixed(0)} ETB",
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          );
+        },
       ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
@@ -64,6 +81,62 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icon(Icons.person_outline),
               activeIcon: Icon(Icons.person),
               label: 'Profile',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCartSummary(BuildContext context, CartState state) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Your Order",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const Divider(),
+            ...state.items.map(
+              (item) => ListTile(
+                title: Text(item.name),
+                trailing: Text(
+                  "${item.quantity} x ${item.price.toStringAsFixed(0)} ETB",
+                ),
+              ),
+            ),
+            const Divider(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Total:",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  "${state.totalCartPrice.toStringAsFixed(0)} ETB",
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            AppButton(
+              label: "Clear Cart",
+              variant: AppButtonVariant.secondary,
+              onPressed: () {
+                context.read<CartCubit>().clearCart();
+                Navigator.pop(ctx);
+              },
             ),
           ],
         ),

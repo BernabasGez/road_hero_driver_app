@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Added this here at the top
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:road_hero/features/home/presentation/bloc/home_cubit.dart';
+import 'package:road_hero/features/home/presentation/bloc/cart_cubit.dart';
 import 'core/di/injection_container.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
@@ -11,6 +13,7 @@ import 'features/auth/presentation/screens/otp_verification_screen.dart';
 import 'features/auth/presentation/screens/forgot_password_screen.dart';
 import 'features/auth/presentation/screens/reset_password_screen.dart';
 import 'features/home/presentation/screens/home_screen.dart';
+import 'features/auth/presentation/screens/auth_entry_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,16 +24,13 @@ void main() async {
 class RoadHeroApp extends StatelessWidget {
   const RoadHeroApp({super.key});
 
-  // lib/main.dart
-
   @override
   Widget build(BuildContext context) {
     return MultiBlocProvider(
-      // 1. We changed this from BlocProvider to MultiBlocProvider
       providers: [
-        // 2. We put both Auth and Home controllers here at the top
         BlocProvider(create: (_) => sl<AuthBloc>()),
         BlocProvider(create: (_) => sl<HomeCubit>()),
+        BlocProvider(create: (_) => sl<CartCubit>()),
       ],
       child: MaterialApp(
         title: 'RoadHero',
@@ -50,103 +50,71 @@ class _AppNavigator extends StatefulWidget {
 }
 
 class _AppNavigatorState extends State<_AppNavigator> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<AuthBloc, AuthState>(
       listener: (context, state) {
-        // Handle global auth state transitions
+        if (state is Authenticated || state is OtpVerified) {
+          _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+        }
       },
       builder: (context, state) {
-        // Debug print to see what is happening in your terminal
-        print("Current Auth State: $state");
-
-        return Navigator(
-          pages: [
-            // 1. Splash Screen
-            if (state is AuthInitial) const MaterialPage(child: SplashScreen()),
-
-            // 2. Loading Screen (Prevents falling back to Login while waiting for API)
-            if (state is AuthLoading)
-              const MaterialPage(
-                child: Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                ),
-              ),
-
-            // 3. Login/Signup Screen (Only show if explicitly unauthenticated)
-            if (state is Unauthenticated || state is AuthError)
-              MaterialPage(
-                key: const ValueKey('LoginPage'),
-                child: LoginScreen(
-                  onSignup: () => _push(context, _AuthMode.signup),
-                  onForgotPassword: () => _push(context, _AuthMode.forgot),
-                ),
-              ),
-
-            // 4. Home Screen (Only show if authenticated)
-            if (state is Authenticated || state is OtpVerified)
-              const MaterialPage(
-                key: ValueKey('HomePage'),
-                child: HomeScreen(),
-              ),
-          ],
-          onPopPage: (route, result) {
-            return route.didPop(result);
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, result) async {
+            if (didPop) return;
+            final NavigatorState? navigator = _navigatorKey.currentState;
+            if (navigator != null && navigator.canPop()) {
+              navigator.pop();
+            } else {
+              _showExitDialog(context);
+            }
           },
+          child: Navigator(
+            key: _navigatorKey,
+            pages: [
+              if (state is AuthInitial)
+                const MaterialPage(child: SplashScreen())
+              else if (state is Unauthenticated || state is AuthError)
+                const MaterialPage(child: AuthEntryScreen())
+              else if (state is Authenticated || state is OtpVerified)
+                const MaterialPage(
+                  key: ValueKey('HomePage'),
+                  child: HomeScreen(),
+                )
+              else
+                const MaterialPage(
+                  child: Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  ),
+                ),
+            ],
+            onPopPage: (route, result) => route.didPop(result),
+          ),
         );
       },
     );
   }
 
-  void _push(BuildContext context, _AuthMode mode) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => BlocProvider.value(
-          value: context.read<AuthBloc>(),
-          child: switch (mode) {
-            _AuthMode.login => LoginScreen(
-              onSignup: () => _push(context, _AuthMode.signup),
-              onForgotPassword: () => _push(context, _AuthMode.forgot),
-            ),
-            _AuthMode.signup => SignupScreen(
-              onLogin: () => Navigator.pop(context),
-              onRegistered: (phone) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => BlocProvider.value(
-                      value: context.read<AuthBloc>(),
-                      child: OtpVerificationScreen(phone: phone),
-                    ),
-                  ),
-                );
-              },
-            ),
-            _AuthMode.forgot => ForgotPasswordScreen(
-              onOtpSent: (phone) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => BlocProvider.value(
-                      value: context.read<AuthBloc>(),
-                      child: ResetPasswordScreen(
-                        phone: phone,
-                        onSuccess: () {
-                          Navigator.of(
-                            context,
-                          ).popUntil((route) => route.isFirst);
-                        },
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          },
-        ),
+  void _showExitDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Exit RoadHero?"),
+        content: const Text("Are you sure you want to close the app?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("No"),
+          ),
+          TextButton(
+            onPressed: () => SystemNavigator.pop(), // Fixed the error here
+            child: const Text("Yes"),
+          ),
+        ],
       ),
     );
   }
 }
-
-enum _AuthMode { login, signup, forgot }

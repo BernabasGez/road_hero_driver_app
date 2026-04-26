@@ -206,6 +206,8 @@ class HomeRemoteSource {
   }
 
   // ─── Service Requests ──────────────────────────
+  // ... inside HomeRemoteSource class ...
+
   Future<ServiceRequestModel> createRequest({
     required int providerId,
     required int serviceTypeId,
@@ -216,20 +218,23 @@ class HomeRemoteSource {
     String? address,
     bool isScheduled = false,
     File? photo,
+    List<Map<String, dynamic>>? spareParts, // Added this parameter
   }) async {
     try {
-      // Documentation requires location as a JSON string object inside FormData
       final locationJson =
           '{"lat": $lat, "lng": $lng, "address": "${address ?? "Addis Ababa"}"}';
+
+      // Convert spare parts to JSON string for multipart delivery
+      final sparePartsJson = spareParts != null ? spareParts.toString() : "[]";
 
       final formData = FormData.fromMap({
         'provider_id': providerId,
         'service_type_id': serviceTypeId,
         'vehicle_id': vehicleId,
         'description': description,
-        'is_scheduled': isScheduled
-            .toString(), // multipart fields are usually strings
+        'is_scheduled': isScheduled.toString(),
         'location': locationJson,
+        'spare_parts': sparePartsJson, // Send cart to backend
         if (photo != null) 'photo': await MultipartFile.fromFile(photo.path),
       });
 
@@ -239,6 +244,7 @@ class HomeRemoteSource {
       throw _err(e);
     }
   }
+  // ... rest of file unchanged ...
 
   Future<List<ServiceRequestModel>> getRequests({String? statusGroup}) async {
     try {

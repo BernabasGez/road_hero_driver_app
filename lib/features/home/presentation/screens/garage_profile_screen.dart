@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:road_hero/features/home/data/models/cart_item_model.dart';
+import 'package:road_hero/features/home/presentation/bloc/cart_cubit.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -105,7 +108,6 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
   Widget build(BuildContext context) {
     final p = _detail ?? widget.provider;
     return Scaffold(
-      // FIX: Changed background to White to remove grey gap
       backgroundColor: Colors.white,
       body: Stack(
         children: [
@@ -114,7 +116,6 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
               SliverAppBar(
                 expandedHeight: 180,
                 pinned: true,
-                // Maintain grey header look
                 backgroundColor: const Color(0xFF6B7280),
                 elevation: 0,
                 leading: _buildCircleAction(
@@ -231,13 +232,7 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
             ? const EmptyView(title: "No parts listed")
             : Column(
                 children: _spareParts
-                    .map(
-                      (part) => _buildPriceItem(
-                        part['name'] ?? 'Part',
-                        part['category'] ?? 'Spare',
-                        "${part['price'] ?? '0'} ETB",
-                      ),
-                    )
+                    .map((part) => _buildSparePartItem(part, p.id))
                     .toList(),
               );
       case 2:
@@ -255,6 +250,53 @@ class _GarageProfileScreenState extends State<GarageProfileScreen>
       default:
         return const SizedBox();
     }
+  }
+
+  Widget _buildSparePartItem(Map<String, dynamic> part, int garageId) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  part['name'] ?? 'Part',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  "${part['price'] ?? '0'} ETB",
+                  style: const TextStyle(color: AppColors.primary),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(
+              Icons.add_shopping_cart,
+              color: AppColors.actionOrange,
+            ),
+            onPressed: () {
+              context.read<CartCubit>().addToCart(
+                CartItemModel(
+                  id: part['id'] ?? 0,
+                  name: part['name'] ?? 'Part',
+                  price: double.tryParse(part['price'].toString()) ?? 0,
+                  garageId: garageId,
+                ),
+              );
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("${part['name']} added to cart"),
+                  duration: const Duration(seconds: 1),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildReviewsView(ProviderModel p) {

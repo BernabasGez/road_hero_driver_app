@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../../../core/theme/app_dimensions.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
 import '../../../../core/widgets/error_view.dart';
@@ -46,10 +45,12 @@ class _ActivityTabState extends State<ActivityTab>
       _error = null;
     });
     try {
+      // RESTORED: Calling different API groups as per your backend requirement
       final results = await Future.wait([
         sl<HomeRemoteSource>().getRequests(statusGroup: 'active'),
         sl<HomeRemoteSource>().getRequests(statusGroup: 'history'),
       ]);
+
       if (mounted) {
         setState(() {
           _active = results[0];
@@ -60,7 +61,7 @@ class _ActivityTabState extends State<ActivityTab>
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = "Failed to load activity. Please try again.";
           _loading = false;
         });
       }
@@ -69,180 +70,141 @@ class _ActivityTabState extends State<ActivityTab>
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // --- Tab Header ---
-        Container(
-          padding: EdgeInsets.fromLTRB(
-            AppDimensions.screenPadding,
-            MediaQuery.of(context).padding.top + 16,
-            AppDimensions.screenPadding,
-            0,
-          ),
-          color: AppColors.surface,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Activity', style: AppTextStyles.h2),
-              const SizedBox(height: AppDimensions.md),
-              TabBar(
-                controller: _tabCtrl,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.textSecondary,
-                indicatorColor: AppColors.primary,
-                indicatorWeight: 3,
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-                tabs: [
-                  Tab(text: 'Active (${_active.length})'),
-                  Tab(text: 'History (${_history.length})'),
-                ],
-              ),
-            ],
-          ),
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('My Activity', style: AppTextStyles.h2),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        bottom: TabBar(
+          controller: _tabCtrl,
+          labelColor: AppColors.primary,
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: AppColors.primary,
+          indicatorWeight: 3,
+          tabs: const [
+            Tab(text: "Active"),
+            Tab(text: "History"),
+          ],
         ),
-
-        // --- List Content ---
-        Expanded(
-          child: _loading
-              ? const SkeletonList()
-              : _error != null
-              ? ErrorView(message: _error!, onRetry: _load)
-              : TabBarView(
-                  controller: _tabCtrl,
-                  children: [
-                    _buildList(_active, isHistory: false),
-                    _buildList(_history, isHistory: true),
-                  ],
-                ),
-        ),
-      ],
+      ),
+      body: _loading
+          ? const SkeletonList()
+          : _error != null
+          ? ErrorView(message: _error!, onRetry: _load)
+          : TabBarView(
+              controller: _tabCtrl,
+              children: [
+                _buildList(_active, "No active requests", isHistory: false),
+                _buildList(_history, "No history found", isHistory: true),
+              ],
+            ),
     );
   }
 
   Widget _buildList(
-    List<ServiceRequestModel> items, {
+    List<ServiceRequestModel> items,
+    String emptyMsg, {
     required bool isHistory,
   }) {
     if (items.isEmpty) {
       return EmptyView(
-        title: isHistory ? 'No past requests' : 'No active requests',
-        subtitle: isHistory
-            ? 'Your service history will appear here'
-            : 'Request assistance to see your live status here',
-        icon: isHistory ? Icons.history : Icons.hourglass_empty_outlined,
+        title: emptyMsg,
+        icon: isHistory ? Icons.history : Icons.hourglass_empty,
       );
     }
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.builder(
-        padding: const EdgeInsets.all(AppDimensions.screenPadding),
+        padding: const EdgeInsets.all(16),
         itemCount: items.length,
-        itemBuilder: (_, i) {
+        itemBuilder: (context, i) {
           final r = items[i];
-
           return GestureDetector(
-            // --- THE ONTAP LOGIC YOU WERE LOOKING FOR ---
             onTap: () {
+              // Navigate based on status
               if (r.isActive) {
-                // ACTIVE: Go to Live Status (No map)
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => TrackingScreen(
-                      requestId: r.id, // mapped from request_id
+                      requestId: r.id,
                       garageName: r.providerName ?? 'Garage',
                     ),
                   ),
                 );
               } else {
-                // COMPLETED/CANCELLED: Go to Receipt/Review page
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => RequestHistoryDetailScreen(
-                      requestId: r.id, // mapped from request_id
-                    ),
+                    builder: (_) => RequestHistoryDetailScreen(requestId: r.id),
                   ),
                 );
               }
             },
             child: Container(
-              margin: const EdgeInsets.only(bottom: AppDimensions.cardSpacing),
-              padding: const EdgeInsets.all(AppDimensions.cardPadding),
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(AppDimensions.cardRadius),
-                boxShadow: const [
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
                   BoxShadow(
-                    color: AppColors.cardShadow,
-                    blurRadius: 8,
-                    offset: Offset(0, 2),
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
               child: Row(
                 children: [
-                  // Icon
                   Container(
-                    width: 48,
-                    height: 48,
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: AppColors.primary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(
-                      Icons.build_outlined,
+                    child: Icon(
+                      isHistory ? Icons.check_circle_outline : Icons.car_repair,
                       color: AppColors.primary,
-                      size: 22,
+                      size: 24,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  // Details
+                  const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                r.providerName ?? 'Garage',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            StatusBadge.fromRequestStatus(r.status),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
                         Text(
-                          r.serviceType ?? 'Automotive Service',
-                          style: AppTextStyles.bodySmall,
+                          r.providerName ?? 'Assistance Garage',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
+                          r.serviceType ?? 'General Assistance',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
                           r.createdAt?.substring(0, 10) ?? '',
                           style: const TextStyle(
-                            fontSize: 10,
                             color: Colors.grey,
+                            fontSize: 10,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+                  StatusBadge.fromRequestStatus(r.status),
                 ],
               ),
             ),

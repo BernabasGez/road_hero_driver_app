@@ -20,10 +20,7 @@ class _RequestHistoryDetailScreenState
     extends State<RequestHistoryDetailScreen> {
   ServiceRequestModel? _request;
   bool _loading = true;
-  int _rating = 0;
-  final _commentCtrl = TextEditingController();
-  final List<String> _selectedTags = [];
-  bool _submittingReview = false;
+  String _selectedPayment = "Telebirr";
 
   @override
   void initState() {
@@ -47,179 +44,241 @@ class _RequestHistoryDetailScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Service Details')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _request == null
-          ? const Center(child: Text('Request not found'))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _buildSummaryCard(),
-                  if (_request!.status.toUpperCase() == 'COMPLETED') ...[
+      appBar: AppBar(
+        title: const Text('Invoice Details'),
+        centerTitle: true,
+        elevation: 0,
+      ),
+      body: SafeArea(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _request == null
+            ? const Center(child: Text('Receipt could not be loaded'))
+            : SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    // Completion Header
+                    _buildStatusHeader(),
+                    const SizedBox(height: 20),
+
+                    // Invoice Content
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "SERVICE SUMMARY",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _row("Provider", _request!.providerName ?? "Garage"),
+                          _row("Vehicle", _request!.vehicleName ?? "-"),
+                          _row("Service", _request!.serviceType ?? "-"),
+                          _row("Status", _request!.status, isStatus: true),
+
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20),
+                            child: Divider(
+                              thickness: 1,
+                              color: AppColors.background,
+                            ),
+                          ),
+
+                          const Text(
+                            "BILLING DETAILS",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          if (_request!.spareParts.isNotEmpty) ...[
+                            ..._request!.spareParts.map(
+                              (item) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      "${item.quantity}x ${item.name}",
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                    Text(
+                                      "${item.total.toStringAsFixed(0)} ETB",
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const Divider(height: 32),
+                          ],
+
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                "TOTAL AMOUNT",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              Text(
+                                "${_calculateTotal().toStringAsFixed(0)} ETB",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary,
+                                  fontSize: 20,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
                     const SizedBox(height: 24),
-                    // Check if rating exists to show "Your Feedback"
-                    (_request!.rating != null && _request!.rating! > 0)
-                        ? _buildExistingReview()
-                        : _buildReviewForm(),
+
+                    // Payment Shell (Ready for backend logic)
+                    if (_request!.status == 'COMPLETED') ...[
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          "Payment Method",
+                          style: AppTextStyles.label,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildPaymentSelector(),
+                      const SizedBox(height: 32),
+                      AppButton(
+                        label: "Proceed to Payment",
+                        onPressed: () => _handlePayment(context),
+                      ),
+                    ],
+                    const SizedBox(height: 30),
                   ],
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildSummaryCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  _request!.providerName ?? 'Garage',
-                  style: AppTextStyles.h3,
                 ),
               ),
-              StatusBadge.fromRequestStatus(_request!.status),
-            ],
-          ),
-          const Divider(height: 32),
-          _infoRow('Service', _request!.serviceType ?? 'General'),
-          _infoRow('Vehicle', _request!.vehicleName ?? 'Vehicle'),
-          _infoRow('Date', _request!.createdAt?.substring(0, 10) ?? ''),
-          if (_request!.description != null)
-            _infoRow('Issue', _request!.description!),
-        ],
       ),
     );
   }
 
-  Widget _buildExistingReview() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.green.shade100),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                "Your Feedback",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              Row(
-                children: List.generate(
-                  5,
-                  (i) => Icon(
-                    Icons.star,
-                    size: 18,
-                    color: i < (_request!.rating ?? 0)
-                        ? Colors.orange
-                        : Colors.grey[200],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _request!.reviewComment ?? "No written comment was provided.",
-            style: const TextStyle(fontSize: 14),
-          ),
-        ],
-      ),
+  double _calculateTotal() {
+    double parts = _request!.spareParts.fold(
+      0,
+      (sum, item) => sum + item.total,
     );
+    double serviceFee = 500; // Placeholder base fee
+    return parts + serviceFee;
   }
 
-  Widget _buildReviewForm() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          const Text(
-            "Rate your experience",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(
-              5,
-              (i) => IconButton(
-                onPressed: () => setState(() => _rating = i + 1),
-                icon: Icon(
-                  i < _rating ? Icons.star : Icons.star_border,
-                  color: Colors.orange,
-                  size: 36,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _commentCtrl,
-            maxLines: 2,
-            decoration: InputDecoration(
-              hintText: "Add a comment...",
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          AppButton(
-            label: "Submit Review",
-            isLoading: _submittingReview,
-            onPressed: () async {
-              if (_rating == 0) return;
-              setState(() => _submittingReview = true);
-              try {
-                await sl<HomeRemoteSource>().submitReview(
-                  requestId: widget.requestId,
-                  rating: _rating,
-                  tags: _selectedTags,
-                  comment: _commentCtrl.text,
-                );
-                _load();
-              } catch (e) {
-                setState(() => _submittingReview = false);
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoRow(String l, String v) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
+  Widget _buildStatusHeader() => Container(
+    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+    decoration: BoxDecoration(
+      color: AppColors.success.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(12),
+    ),
     child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: 80,
+        const Icon(Icons.check_circle_outline, color: AppColors.success),
+        const SizedBox(width: 12),
+        Expanded(
           child: Text(
-            l,
-            style: const TextStyle(color: Colors.grey, fontSize: 13),
+            "Repair Completed Successfully",
+            style: TextStyle(
+              color: AppColors.success,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
           ),
         ),
-        Expanded(child: Text(v, style: const TextStyle(fontSize: 14))),
+      ],
+    ),
+  );
+
+  Widget _buildPaymentSelector() => Row(
+    children: ["Telebirr", "Chapa", "Cash"].map((method) {
+      bool isSelected = _selectedPayment == method;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _selectedPayment = method),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              color: isSelected ? AppColors.primary : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: isSelected
+                  ? null
+                  : Border.all(color: Colors.grey.shade300),
+            ),
+            child: Center(
+              child: Text(
+                method,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.black,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }).toList(),
+  );
+
+  void _handlePayment(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Icon(Icons.payment, color: AppColors.primary, size: 48),
+        content: const Text(
+          "Redirecting to secure payment provider. Please confirm the transaction on your device.",
+          textAlign: TextAlign.center,
+        ),
+        actions: [
+          AppButton(
+            label: "Back to Dashboard",
+            onPressed: () =>
+                Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String l, String v, {bool isStatus = false}) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(l, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+        isStatus
+            ? StatusBadge.fromRequestStatus(v)
+            : Text(
+                v,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
       ],
     ),
   );
